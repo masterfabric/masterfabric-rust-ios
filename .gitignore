@@ -1,0 +1,16 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Build çıktıları ve ekran görüntüleri
+/build/
+/platforms/ios/Frameworks/*.xcframework
+/platforms/ios/MasterFabricRust/Generated/*
+!/platforms/ios/MasterFabricRust/Generated/.gitkeep
+/platforms/ios/*.xcodeproj
+/platforms/ios/DerivedData/
+
+# Xcode
+xcuserdata/
+*.xcuserstate
+.DS_Store
