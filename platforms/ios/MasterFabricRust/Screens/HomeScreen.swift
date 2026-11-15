@@ -59,7 +59,6 @@ struct HomeScreen: View {
         .navigationTitle(home.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .principal) { Wordmark(style: .navigation) }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     bridge.dispatch(.openInfo)
