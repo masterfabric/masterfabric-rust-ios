@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""build/perf/*.json dosyalarının ortanca değerlerini tablo olarak yazar."""
+"""Prints median values of build/perf/*.json files as a table."""
 import json, statistics, sys
 
 files = sys.argv[1:]
 runs = [json.load(open(f)) for f in files]
 med = lambda xs: statistics.median(xs) if xs else float("nan")
-print(f"{len(runs)} çalıştırma (ortanca)")
+print(f"{len(runs)} runs (median)")
 for key in ["launch_to_first_frame_ms", "core_init_us", "dispatch_apply_avg_us", "dispatch_apply_p95_us", "full_snapshot_us", "total_ms"]:
     vals = [r[key] for r in runs if key in r]
     if vals:

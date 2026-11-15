@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Rust çekirdeğini iOS (cihaz + simülatör) için RELEASE derler,
-# UniFFI ile Swift köprüsünü üretir ve AppCore.xcframework'ü oluşturur.
+# Builds the Rust core in RELEASE for iOS (device + simulator),
+# generates the Swift bridge with UniFFI and creates AppCore.xcframework.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -18,12 +18,12 @@ XCF="$IOS/Frameworks/AppCore.xcframework"
 
 echo "==> Rust: aarch64-apple-ios (cihaz)"
 cargo build -p "$CRATE" --release --target aarch64-apple-ios
-echo "==> Rust: aarch64-apple-ios-sim (Apple Silicon simülatör)"
+echo "==> Rust: aarch64-apple-ios-sim (Apple Silicon simulator)"
 cargo build -p "$CRATE" --release --target aarch64-apple-ios-sim
-echo "==> Rust: host dylib (UniFFI metadata için)"
+echo "==> Rust: host dylib (for UniFFI metadata)"
 cargo build -p "$CRATE" --release
 
-echo "==> UniFFI: Swift bağlamaları"
+echo "==> UniFFI: Swift bindings"
 rm -rf "$GEN" "$HEADERS" && mkdir -p "$GEN" "$HEADERS"
 cargo run -q -p uniffi-bindgen -- generate \
   --library "target/release/$LIB.dylib" \

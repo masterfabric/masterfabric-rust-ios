@@ -2,7 +2,7 @@
 /target/
 **/*.rs.bk
 
-# Build çıktıları ve ekran görüntüleri
+# Build output and screenshots
 /build/
 /platforms/ios/Frameworks/*.xcframework
 /platforms/ios/MasterFabricRust/Generated/*
