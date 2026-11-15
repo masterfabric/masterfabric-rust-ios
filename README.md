@@ -1,6 +1,6 @@
 # MasterFabric Rust (iOS)
 
-Discord'un 2026'da duyurduğu mimarinin küçük bir örneği: **ekranlar yerel (SwiftUI) ve yalnızca çizer; uygulama durumu, navigasyon, veri ve iş kuralları paylaşılan bir Rust çekirdeğinde yaşar.** Swift ile Rust arasındaki köprüyü [UniFFI](https://mozilla.github.io/uniffi-rs/) otomatik üretir.
+**Paylaşılan Rust çekirdeği, yerel arayüz** mimarisinin küçük bir örneği: **ekranlar yerel (SwiftUI) ve yalnızca çizer; uygulama durumu, navigasyon, veri ve iş kuralları paylaşılan bir Rust çekirdeğinde yaşar.** Swift ile Rust arasındaki köprüyü [UniFFI](https://mozilla.github.io/uniffi-rs/) otomatik üretir.
 
 Uygulamada üç ekran var:
 

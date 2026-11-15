@@ -1,47 +1,68 @@
+import Charts
 import SwiftUI
 
-/// Benchmark ekranı. Test listesi, sıra, ilerleme, oranlar ve yorumlar Rust'ta;
-/// ölçümler arka plan thread'inde (önce Rust, sonra aynı algoritmanın Swift'i) yapılır.
+/// Benchmark screen. Test list, categories, order, progress, ratios and verdicts live in Rust;
+/// measurements run on a background thread (Rust single-thread, Rust rayon, then the same
+/// algorithm in Swift). Media workloads are the featured category, at the top.
 struct BenchmarkScreen: View {
     @Environment(CoreBridge.self) private var bridge
+    @State private var chartCategory = "Media"
 
     var body: some View {
-        let b = bridge.state.benchmark
+        let b = bridge.benchmark
+        let categories = orderedCategories(b.rows)
         ScrollViewReader { proxy in
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                EnvironmentCard(bench: b)
-                controls(b)
-                ResultsTable(rows: b.rows)
-                if let summary = b.summary {
-                    SummaryCard(summary: summary, totalMs: b.lastTotalMs)
-                }
-                Text("Testler").font(.headline).padding(.top, 4)
-                ForEach(b.rows, id: \.id) { row in
-                    BenchCard(row: row, disabled: b.running) {
-                        bridge.dispatch(.runBenchmark(id: row.id))
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    EnvironmentCard(bench: b)
+                    controls(b)
+                    if let summary = b.summary {
+                        SummaryCard(summary: summary, totalMs: b.lastTotalMs)
                     }
-                    .id(row.id)
+                    SectionTitle(title: "Featured: Media", symbol: "sparkles.tv").id("media")
+                    MediaPreviewCard()
+                    SectionTitle(title: "Results table", symbol: "tablecells").id("table")
+                    ResultsTable(rows: b.rows, categories: categories, threads: b.rustThreads)
+                    SectionTitle(title: "Charts", symbol: "chart.bar.xaxis").id("charts")
+                    RatioChartCard(rows: b.rows)
+                    DurationChartCard(rows: b.rows, categories: categories, selection: $chartCategory)
+                    SectionTitle(title: "App performance", symbol: "gauge.with.dots.needle.67percent").id("perf")
+                    AppPerfCard()
+                    ForEach(categories, id: \.self) { cat in
+                        SectionTitle(title: cat == "Media" ? "Media workloads" : "General workloads",
+                                     symbol: cat == "Media" ? "film" : "cpu")
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 330), spacing: 12)], spacing: 12) {
+                            ForEach(b.rows.filter { $0.category == cat }, id: \.id) { row in
+                                BenchCard(row: row, threads: b.rustThreads, disabled: b.running) {
+                                    bridge.dispatch(.runBenchmark(id: row.id))
+                                }
+                                .id(row.id)
+                            }
+                        }
+                    }
+                    Text("Each test: 1 warm-up run + the shown number of measured runs. Ratio = Swift avg / Rust single-thread avg. Rust ∥ (rayon) is shown separately and is not part of the ratio. Checksums confirm both languages (and the parallel variant) produce the same result.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                Text("Her test: 1 ısınma turu + gösterilen sayıda ölçüm. Oran = Swift ort. / Rust ort. Checksum iki dilin aynı sonucu ürettiğini doğrular.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding()
-        }
-        .background(Color(.systemGroupedBackground))
-        .onChange(of: b.running) { _, running in
-            // Hata ayıklama/otomasyon: `-scrollTo <testId>` çalıştırma bitince o karta kaydırır.
-            if !running, let target = UserDefaults.standard.string(forKey: "scrollTo") {
-                withAnimation { proxy.scrollTo(target, anchor: .top) }
+            .background(Color(.systemGroupedBackground))
+            .onChange(of: b.running) { _, running in
+                // Debug/automation: `-scrollTo <target>` scrolls there when the run finishes.
+                if !running, let target = UserDefaults.standard.string(forKey: "scrollTo") {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                        proxy.scrollTo(target, anchor: .top)
+                    }
+                }
             }
-        }
         }
         .navigationTitle("Benchmark")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button("Sıfırla") { bridge.dispatch(.resetBenchmarks) }
+                Button("Reset") { bridge.dispatch(.resetBenchmarks) }
                     .disabled(b.running)
             }
         }
@@ -53,7 +74,8 @@ struct BenchmarkScreen: View {
             Button {
                 bridge.dispatch(.runAllBenchmarks)
             } label: {
-                Label(b.running ? "Çalışıyor…" : "Tümünü çalıştır", systemImage: b.running ? "hourglass" : "play.fill")
+                Label(b.running ? "Running…" : "Run all (\(b.rows.count) tests)",
+                      systemImage: b.running ? "hourglass" : "play.fill")
                     .font(.headline)
                     .frame(maxWidth: .infinity)
             }
@@ -65,9 +87,9 @@ struct BenchmarkScreen: View {
             if b.running || b.progress > 0 {
                 ProgressView(value: b.progress) {
                     HStack {
-                        Text(b.currentLabel ?? (b.running ? "Hazırlanıyor…" : "Tamamlandı"))
+                        Text(b.currentLabel ?? (b.running ? "Preparing…" : "Done"))
                         Spacer()
-                        Text("%\(Int(b.progress * 100))").monospacedDigit()
+                        Text("\(Int(b.progress * 100))%").monospacedDigit()
                     }
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -78,39 +100,89 @@ struct BenchmarkScreen: View {
     }
 }
 
+func orderedCategories(_ rows: [BenchRow]) -> [String] {
+    var out: [String] = []
+    for r in rows where !out.contains(r.category) { out.append(r.category) }
+    return out
+}
+
+func shortName(_ id: String, fallback: String = "") -> String {
+    switch id {
+    case "raytrace": return "Ray tracing"
+    case "raster": return "Rasterization"
+    case "image": return "Image processing"
+    case "video": return "Video processing"
+    case "mesh": return "3D mesh"
+    case "fib": return "Fibonacci"
+    case "sort": return "Sort 1M"
+    case "sha256": return "SHA-256"
+    case "json": return "JSON"
+    case "sieve": return "Prime sieve"
+    case "matmul": return "Matrix"
+    case "hashmap": return "HashMap"
+    default: return fallback
+    }
+}
+
+func categoryColor(_ c: String) -> Color { c == "Media" ? .pink : .orange }
+
+struct SectionTitle: View {
+    let title: String
+    let symbol: String
+    var body: some View {
+        Label(title, systemImage: symbol)
+            .font(.title3.weight(.bold))
+            .padding(.top, 6)
+    }
+}
+
+struct Card<Content: View>: View {
+    @ViewBuilder var content: Content
+    var body: some View {
+        content
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.background, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
 private struct EnvironmentCard: View {
     let bench: BenchmarkState
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: DeviceInfo.isSimulator ? "macbook.and.iphone" : "iphone")
-                Text("\(DeviceInfo.deviceName) · \(DeviceInfo.os)").font(.subheadline.weight(.semibold))
-            }
-            HStack(spacing: 6) {
-                Chip(text: "Swift \(DeviceInfo.swiftBuild)", warn: DeviceInfo.swiftBuild == "Debug")
-                Chip(text: "Rust \(bench.rustProfile)", warn: bench.rustProfile != "release")
-                Chip(text: "\(DeviceInfo.cores) çekirdek · \(DeviceInfo.memoryGB)")
-            }
-            Text("\(DeviceInfo.machine) · \(bench.coreInfo)")
-                .font(.caption2.monospaced()).foregroundStyle(.tertiary)
-            if DeviceInfo.isSimulator || DeviceInfo.swiftBuild == "Debug" || bench.rustProfile != "release" {
-                Label(caveat, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
+        Card {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Image(systemName: DeviceInfo.isSimulator ? "macbook.and.iphone" : "iphone")
+                    Text("\(DeviceInfo.deviceName) · \(DeviceInfo.os)").font(.subheadline.weight(.semibold))
+                }
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 6) { chips }
+                    VStack(alignment: .leading, spacing: 6) { chips }
+                }
+                Text("\(DeviceInfo.machine) · \(bench.coreInfo)")
+                    .font(.caption2.monospaced()).foregroundStyle(.tertiary)
+                if DeviceInfo.isSimulator || DeviceInfo.swiftBuild == "Debug" || bench.rustProfile != "release" {
+                    Label(caveat, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(.background, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    @ViewBuilder private var chips: some View {
+        Chip(text: "Swift \(DeviceInfo.swiftBuild)", warn: DeviceInfo.swiftBuild == "Debug")
+        Chip(text: "Rust \(bench.rustProfile)", warn: bench.rustProfile != "release")
+        Chip(text: "\(DeviceInfo.cores) cores · \(DeviceInfo.memoryGB)")
     }
 
     private var caveat: String {
         var parts: [String] = []
-        if DeviceInfo.isSimulator { parts.append("Simülatör: ölçülen işlemci Mac'in CPU'su, gerçek iPhone değil.") }
-        if DeviceInfo.swiftBuild == "Debug" { parts.append("Swift Debug derlemesi: optimize değil, Swift sonuçları çok yavaş çıkar.") }
-        if bench.rustProfile != "release" { parts.append("Rust debug derlemesi: sonuçlar anlamsız.") }
+        if DeviceInfo.isSimulator { parts.append("Simulator: the measured CPU is the Mac's, not a real iPhone.") }
+        if DeviceInfo.swiftBuild == "Debug" { parts.append("Swift Debug build: unoptimized, Swift results will be very slow.") }
+        if bench.rustProfile != "release" { parts.append("Rust debug build: results are meaningless.") }
         return parts.joined(separator: " ")
     }
 }
@@ -129,52 +201,157 @@ private struct Chip: View {
     }
 }
 
-/// Özet veri tablosu: tüm testler tek bakışta.
-private struct ResultsTable: View {
-    let rows: [BenchRow]
+/// Rust and Swift ray tracer output side by side + summary of the 3D mesh generated in Rust.
+private struct MediaPreviewCard: View {
+    @Environment(CoreBridge.self) private var bridge
+    @State private var rustImage: CGImage?
+    @State private var swiftImage: CGImage?
+    @State private var diffPixels: Int?
+    @State private var mesh: MeshSummary?
+    @State private var rendering = false
+
+    private let size = 256
 
     var body: some View {
-        Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 8) {
-            GridRow {
-                Text("Test")
-                Text("Rust").gridColumnAlignment(.trailing)
-                Text("Swift").gridColumnAlignment(.trailing)
-                Text("Oran").gridColumnAlignment(.trailing)
-            }
-            .font(.caption.weight(.bold))
-            .foregroundStyle(.secondary)
-            Divider()
-            ForEach(rows, id: \.id) { row in
-                GridRow {
-                    HStack(spacing: 4) {
-                        Text(shortName(row))
-                        if row.checksumMatch == false {
-                            Image(systemName: "xmark.octagon.fill").foregroundStyle(.red)
-                        }
-                    }
-                    .lineLimit(1)
-                    msText(row.rust, active: row.status == .runningRust)
-                    msText(row.swift, active: row.status == .runningSwift)
-                    ratioText(row)
+        Card {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    preview(title: "Rust", color: .orange, image: rustImage)
+                    preview(title: "Swift", color: .blue, image: swiftImage)
                 }
-                .font(.footnote)
+                if let diffPixels {
+                    Label(diffPixels == 0 ? "Both outputs are pixel-identical (\(size)×\(size))"
+                                          : "\(diffPixels) pixels differ (floating-point rounding)",
+                          systemImage: diffPixels == 0 ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(diffPixels == 0 ? .green : .orange)
+                }
+                if let mesh {
+                    HStack(spacing: 10) {
+                        Image(systemName: "cube.transparent.fill").foregroundStyle(.purple)
+                        Text("Rust 3D mesh: \(mesh.vertices.formatted()) vertices · \(mesh.triangles.formatted()) triangles · OBJ \(ByteCountFormatter.string(fromByteCount: Int64(mesh.objBytes), countStyle: .file))")
+                            .font(.caption)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                Button {
+                    Task { await render() }
+                } label: {
+                    Label(rendering ? "Rendering…" : "Render again", systemImage: "arrow.clockwise")
+                        .font(.subheadline)
+                }
+                .buttonStyle(.bordered)
+                .disabled(rendering)
             }
         }
-        .padding()
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.background, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .task { if rustImage == nil { await render() } }
     }
 
-    private func shortName(_ row: BenchRow) -> String {
-        switch row.id {
-        case "fib": return "Fibonacci"
-        case "sort": return "Sıralama 1M"
-        case "sha256": return "SHA-256"
-        case "json": return "JSON"
-        case "sieve": return "Asal elek"
-        case "matmul": return "Matris"
-        case "hashmap": return "HashMap"
-        default: return row.name
+    private func preview(title: String, color: Color, image: CGImage?) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("\(title) ray tracer").font(.caption.weight(.bold)).foregroundStyle(color)
+            ZStack {
+                RoundedRectangle(cornerRadius: 12).fill(Color.secondary.opacity(0.1))
+                if let image {
+                    Image(decorative: image, scale: 1)
+                        .resizable()
+                        .interpolation(.medium)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                } else {
+                    ProgressView()
+                }
+            }
+            .aspectRatio(1, contentMode: .fit)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func render() async {
+        rendering = true
+        let core = bridge.core
+        let n = size
+        let result = await Task.detached(priority: .userInitiated) { () -> ([UInt8], [UInt8], MeshSummary) in
+            let rust = [UInt8](core.raytraceImage(width: UInt32(n), height: UInt32(n)))
+            let swift = SwiftMedia.raytrace(n, n)
+            let mesh = core.generateMesh(levels: 5)
+            return (rust, swift, mesh)
+        }.value
+        rustImage = makeImage(result.0, n, n)
+        swiftImage = makeImage(result.1, n, n)
+        var diff = 0
+        for p in stride(from: 0, to: min(result.0.count, result.1.count), by: 4)
+        where result.0[p] != result.1[p] || result.0[p + 1] != result.1[p + 1] || result.0[p + 2] != result.1[p + 2] {
+            diff += 1
+        }
+        diffPixels = diff
+        mesh = result.2
+        rendering = false
+    }
+}
+
+func makeImage(_ rgba: [UInt8], _ w: Int, _ h: Int) -> CGImage? {
+    guard rgba.count == w * h * 4, let provider = CGDataProvider(data: Data(rgba) as CFData) else { return nil }
+    return CGImage(width: w, height: h, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: w * 4,
+                   space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                   bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue),
+                   provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
+}
+
+/// Summary data table: all tests, grouped by category.
+private struct ResultsTable: View {
+    let rows: [BenchRow]
+    let categories: [String]
+    let threads: UInt32
+
+    var body: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 8) {
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 9) {
+                GridRow {
+                    Text("Test")
+                    Text("Rust").gridColumnAlignment(.trailing)
+                    Text("Rust ∥").gridColumnAlignment(.trailing)
+                    Text("Swift").gridColumnAlignment(.trailing)
+                    Text("Ratio").gridColumnAlignment(.trailing)
+                }
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.secondary)
+                ForEach(categories, id: \.self) { cat in
+                    GridRow {
+                        Text(cat.uppercased())
+                            .font(.caption.weight(.heavy))
+                            .foregroundStyle(categoryColor(cat))
+                            .gridCellColumns(5)
+                            .padding(.top, 4)
+                    }
+                    Divider().gridCellUnsizedAxes(.horizontal)
+                    ForEach(rows.filter { $0.category == cat }, id: \.id) { row in
+                        GridRow {
+                            HStack(spacing: 4) {
+                                Text(shortName(row.id, fallback: row.name))
+                                if row.checksumMatch == false {
+                                    Image(systemName: "xmark.octagon.fill").foregroundStyle(.red)
+                                }
+                            }
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            msText(row.rust, active: row.status == .runningRust && row.rust == nil)
+                            if row.hasParallel {
+                                msText(row.rustParallel, active: row.status == .runningRust && row.rust != nil)
+                                    .foregroundStyle(.brown)
+                            } else {
+                                Text("n/a").foregroundStyle(.tertiary)
+                            }
+                            msText(row.swift, active: row.status == .runningSwift)
+                            ratioText(row)
+                        }
+                        .font(.footnote)
+                    }
+                }
+            }
+            Text("Rust = single thread · Rust ∥ = rayon, \(threads) threads (not in ratio) · Ratio = Swift / Rust")
+                .font(.caption2).foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -195,10 +372,106 @@ private struct ResultsTable: View {
             Text(String(format: "%.2f×", r))
                 .monospacedDigit()
                 .fontWeight(.semibold)
-                .foregroundStyle(r >= 1.05 ? Color.orange : (r <= 0.95 ? Color.blue : Color.secondary))
+                .foregroundStyle(ratioColor(r))
         } else {
             Text("—").foregroundStyle(.tertiary)
         }
+    }
+}
+
+func ratioColor(_ r: Double) -> Color { r > 1.05 ? .orange : (r < 0.95 ? .blue : .secondary) }
+
+/// Swift Charts: Swift/Rust ratio per test (1× = equal).
+private struct RatioChartCard: View {
+    let rows: [BenchRow]
+    var body: some View {
+        let done = rows.filter { $0.ratio != nil }
+        Card {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Rust vs Swift (ratio)").font(.headline)
+                Text("Bars right of 1× mean Rust is faster (single thread vs single thread).").font(.caption).foregroundStyle(.secondary)
+                if done.isEmpty {
+                    EmptyChartHint()
+                } else {
+                    Chart {
+                        ForEach(done, id: \.id) { row in
+                            BarMark(x: .value("Ratio", row.ratio ?? 0),
+                                    y: .value("Test", shortName(row.id, fallback: row.name)))
+                                .foregroundStyle(by: .value("Category", row.category))
+                                .annotation(position: .trailing, alignment: .leading) {
+                                    Text(String(format: "%.2f×", row.ratio ?? 0))
+                                        .font(.caption2.monospacedDigit())
+                                        .foregroundStyle(.secondary)
+                                }
+                        }
+                        RuleMark(x: .value("Equal", 1.0))
+                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                            .foregroundStyle(.secondary)
+                    }
+                    .chartForegroundStyleScale(["Media": Color.pink, "General": Color.orange])
+                    .chartLegend(position: .bottom)
+                    .frame(height: CGFloat(done.count) * 30 + 50)
+                }
+            }
+        }
+    }
+}
+
+/// Swift Charts: Rust, Rust ∥ and Swift side by side in ms for the selected category.
+private struct DurationChartCard: View {
+    let rows: [BenchRow]
+    let categories: [String]
+    @Binding var selection: String
+
+    struct Point: Identifiable {
+        let id: String
+        let test: String
+        let lang: String
+        let ms: Double
+    }
+
+    var body: some View {
+        let points: [Point] = rows.filter { $0.category == selection }.flatMap { r -> [Point] in
+            var out: [Point] = []
+            let name = shortName(r.id, fallback: r.name)
+            if let m = r.rust { out.append(Point(id: r.id + "r", test: name, lang: "Rust", ms: m.avgMs)) }
+            if let m = r.rustParallel { out.append(Point(id: r.id + "p", test: name, lang: "Rust ∥", ms: m.avgMs)) }
+            if let m = r.swift { out.append(Point(id: r.id + "s", test: name, lang: "Swift", ms: m.avgMs)) }
+            return out
+        }
+        Card {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Duration (ms, lower is better)").font(.headline)
+                    Spacer()
+                }
+                Picker("Category", selection: $selection) {
+                    ForEach(categories, id: \.self) { Text($0).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                if points.isEmpty {
+                    EmptyChartHint()
+                } else {
+                    Chart(points) { p in
+                        BarMark(x: .value("ms", p.ms), y: .value("Test", p.test))
+                            .foregroundStyle(by: .value("Language", p.lang))
+                            .position(by: .value("Language", p.lang))
+                    }
+                    .chartForegroundStyleScale(["Rust": Color.orange, "Rust ∥": Color.brown, "Swift": Color.blue])
+                    .chartLegend(position: .bottom)
+                    .frame(height: CGFloat(Set(points.map(\.test)).count) * 56 + 50)
+                }
+            }
+        }
+    }
+}
+
+private struct EmptyChartHint: View {
+    var body: some View {
+        Label("Run the tests to see charts", systemImage: "chart.bar")
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, minHeight: 80)
     }
 }
 
@@ -209,38 +482,40 @@ private struct SummaryCard: View {
         VStack(alignment: .leading, spacing: 4) {
             Label(summary, systemImage: "chart.bar.xaxis").font(.subheadline.weight(.semibold))
             if let totalMs {
-                Text("Toplam süre (ısınma dahil, iki dil): \(String(format: "%.2f", totalMs / 1000)) sn")
+                Text("Total time (incl. warm-up, all variants): \(String(format: "%.2f", totalMs / 1000)) s")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Text("Oran > 1: Rust daha hızlı (turuncu) · < 1: Swift daha hızlı (mavi)")
+            Text("Ratio > 1: Rust faster (orange) · < 1: Swift faster (blue)")
                 .font(.caption2).foregroundStyle(.secondary)
         }
+        .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
         .background(.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
 
 private struct BenchCard: View {
     let row: BenchRow
+    let threads: UInt32
     let disabled: Bool
     let run: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
-                IconTile(symbol: row.symbol, color: .orange, size: 34)
+                IconTile(symbol: row.symbol, color: categoryColor(row.category), size: 36)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(row.name).font(.subheadline.weight(.semibold))
-                    Text("\(row.description) · \(row.iterations)× ölçüm")
+                    Text("\(row.description) · \(row.iterations)× measured")
                         .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 4)
                 Button(action: run) {
                     Image(systemName: "play.circle.fill").font(.title2)
                 }
                 .disabled(disabled)
-                .accessibilityLabel("\(row.name) çalıştır")
+                .accessibilityLabel("Run \(row.name)")
             }
 
             HStack(spacing: 10) {
@@ -252,18 +527,36 @@ private struct BenchCard: View {
                 RatioBar(rust: r.avgMs, swift: s.avgMs)
             }
 
+            if row.hasParallel {
+                HStack(spacing: 6) {
+                    Image(systemName: "square.stack.3d.up.fill").foregroundStyle(.brown)
+                    if let p = row.rustParallel {
+                        Text("Rust ×\(threads) threads (rayon): \(formatMs(p.avgMs))")
+                            .monospacedDigit()
+                        if let sp = row.parallelSpeedup {
+                            Text(String(format: "· %.1f× vs 1 thread", sp)).foregroundStyle(.secondary)
+                        }
+                    } else {
+                        Text("Rust ×\(threads) threads (rayon): —").foregroundStyle(.secondary)
+                    }
+                }
+                .font(.caption)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            }
+
             HStack {
                 StatusBadge(status: row.status)
                 Spacer()
                 if let v = row.verdict { Text(v).font(.caption.weight(.semibold)) }
                 if let ok = row.checksumMatch {
-                    Label(ok ? "checksum eşleşti" : "checksum farklı", systemImage: ok ? "checkmark.seal.fill" : "xmark.seal.fill")
+                    Label(ok ? "checksum match" : "checksum mismatch", systemImage: ok ? "checkmark.seal.fill" : "xmark.seal.fill")
                         .font(.caption2)
                         .foregroundStyle(ok ? .green : .red)
                 }
             }
         }
-        .padding()
+        .padding(14)
         .background(.background, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
@@ -279,7 +572,7 @@ private struct LangColumn: View {
             Text(lang).font(.caption2.weight(.bold)).foregroundStyle(color)
             if let m {
                 Text(formatMs(m.avgMs)).font(.title3.weight(.semibold).monospacedDigit())
-                Text("en iyi \(formatMs(m.minMs)) · \(m.iterations)×")
+                Text("best \(formatMs(m.minMs)) · \(m.iterations)×")
                     .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
             } else if active {
                 ProgressView().frame(height: 28)
@@ -313,18 +606,16 @@ private struct StatusBadge: View {
     var body: some View {
         let (text, color): (String, Color) = {
             switch status {
-            case .idle: return ("Bekliyor", .secondary)
-            case .queued: return ("Sırada", .secondary)
-            case .runningRust: return ("Rust ölçülüyor", .orange)
-            case .runningSwift: return ("Swift ölçülüyor", .blue)
-            case .done: return ("Tamamlandı", .green)
+            case .idle: return ("Idle", .secondary)
+            case .queued: return ("Queued", .secondary)
+            case .runningRust: return ("Measuring Rust", .orange)
+            case .runningSwift: return ("Measuring Swift", .blue)
+            case .done: return ("Done", .green)
             case .failed(let message): return (message, .red)
             }
         }()
         Text(text)
             .font(.caption2.weight(.semibold))
-            .lineLimit(1)
-            .fixedSize()
             .padding(.horizontal, 8).padding(.vertical, 3)
             .background(color.opacity(0.15), in: Capsule())
             .foregroundStyle(color)
@@ -335,4 +626,48 @@ func formatMs(_ ms: Double) -> String {
     if ms >= 100 { return String(format: "%.0f ms", ms) }
     if ms >= 10 { return String(format: "%.1f ms", ms) }
     return String(format: "%.2f ms", ms)
+}
+
+/// App-level performance: launch time, dispatch → render latency, Rust dispatch cost.
+/// Values are recorded into Rust (`recordPerf`) and rendered from Rust state.
+struct AppPerfCard: View {
+    @Environment(CoreBridge.self) private var bridge
+
+    var body: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 10) {
+                if bridge.perf.isEmpty {
+                    Text("No measurements yet.").font(.subheadline).foregroundStyle(.secondary)
+                }
+                ForEach(bridge.perf, id: \.id) { m in
+                    HStack(alignment: .firstTextBaseline) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(m.label).font(.subheadline)
+                            Text(m.detail).font(.caption2).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 8)
+                        Text(formatPerf(m)).font(.subheadline.weight(.semibold).monospacedDigit())
+                    }
+                }
+                Button {
+                    Task { await bridge.measureAndRecordLatency() }
+                } label: {
+                    Label(bridge.measuringLatency ? "Measuring…" : "Measure UI latency", systemImage: "stopwatch")
+                        .font(.subheadline)
+                }
+                .buttonStyle(.bordered)
+                .disabled(bridge.measuringLatency || bridge.benchmark.running)
+                .accessibilityIdentifier("measure-latency")
+            }
+        }
+    }
+}
+
+func formatPerf(_ m: PerfMetric) -> String {
+    switch m.unit {
+    case "µs": return m.value >= 1000 ? String(format: "%.2f ms", m.value / 1000) : String(format: "%.1f µs", m.value)
+    case "ms": return String(format: "%.1f ms", m.value)
+    default: return String(format: "%.2f %@", m.value, m.unit)
+    }
 }

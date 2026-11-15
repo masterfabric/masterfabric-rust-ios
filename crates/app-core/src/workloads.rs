@@ -1,17 +1,18 @@
-//! Benchmark iş yükleri (Rust tarafı).
+//! Benchmark workloads (Rust side).
 //!
-//! Her iş yükünün Swift'te birebir aynı algoritmayla yazılmış bir eşi vardır
+//! Every workload has a Swift twin written with the exact same algorithm
 //! (`platforms/ios/MasterFabricRust/Benchmarks/SwiftWorkloads.swift`).
-//! Her iki taraf da bir `checksum` döndürür; checksum'lar eşleşirse iki dil
-//! gerçekten aynı işi yapmış demektir. Parametreler Rust'tan çalışma anında
-//! verilir; böylece derleyiciler sonucu derleme anında hesaplayamaz.
+//! Both sides return a `checksum`; matching checksums prove both languages did the
+//! same work. Parameters are passed at runtime from Rust so compilers cannot
+//! constant-fold the results.
 
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::hint::black_box;
 use std::time::Instant;
 
-/// Benchmark kimlikleri. Swift tarafı da aynı kimlikleri kullanır.
+/// Benchmark ids. The Swift side uses the same ids.
 pub const FIB: &str = "fib";
 pub const SORT: &str = "sort";
 pub const SHA256: &str = "sha256";
@@ -19,8 +20,13 @@ pub const JSON: &str = "json";
 pub const SIEVE: &str = "sieve";
 pub const MATMUL: &str = "matmul";
 pub const HASHMAP: &str = "hashmap";
+pub const RAYTRACE: &str = "raytrace";
+pub const RASTER: &str = "raster";
+pub const IMAGE: &str = "image";
+pub const VIDEO: &str = "video";
+pub const MESH: &str = "mesh";
 
-/// Swift'teki karşılığı ile aynı xorshift32 üreteci.
+/// xorshift32 generator, identical to the Swift version.
 #[derive(Clone, Copy)]
 pub struct XorShift32(pub u32);
 
@@ -36,7 +42,7 @@ impl XorShift32 {
     }
 }
 
-/// Tek bir çalıştırma. Bilinmeyen kimlikte `None`.
+/// One run. `None` for an unknown id.
 pub fn run_once(id: &str, param: u64) -> Option<u64> {
     let param = black_box(param);
     let checksum = match id {
@@ -47,19 +53,47 @@ pub fn run_once(id: &str, param: u64) -> Option<u64> {
         SIEVE => prime_sieve(param as usize),
         MATMUL => matmul(param as usize),
         HASHMAP => hashmap_count(param as usize),
+        RAYTRACE => crate::media::raytrace_bench(param as usize),
+        RASTER => crate::media::rasterize(param as usize),
+        IMAGE => crate::media::image_pipeline(param as usize),
+        VIDEO => crate::media::video_pipeline(param as usize),
+        MESH => crate::media::mesh_bench(param as u32),
         _ => return None,
     };
     Some(black_box(checksum))
 }
 
-/// 1 ısınma turu + `iterations` ölçüm. (ortalama ms, en iyi ms, checksum)
+/// Multi-threaded (rayon) variant. `None` if the workload has no parallel version.
+pub fn run_once_parallel(id: &str, param: u64) -> Option<u64> {
+    let param = black_box(param);
+    let checksum = match id {
+        RAYTRACE => crate::media::raytrace_par_bench(param as usize),
+        RASTER => crate::media::rasterize_par(param as usize),
+        IMAGE => crate::media::image_pipeline_par(param as usize),
+        VIDEO => crate::media::video_pipeline_par(param as usize),
+        SORT => sort_ints_par(param as usize),
+        MATMUL => matmul_par(param as usize),
+        _ => return None,
+    };
+    Some(black_box(checksum))
+}
+
+/// 1 warm-up run + `iterations` timed runs. (avg ms, best ms, checksum)
 pub fn measure(id: &str, param: u64, iterations: u32) -> Option<(f64, f64, u64)> {
-    let checksum = run_once(id, param)?; // ısınma
+    measure_with(|| run_once(id, param), iterations)
+}
+
+pub fn measure_parallel(id: &str, param: u64, iterations: u32) -> Option<(f64, f64, u64)> {
+    measure_with(|| run_once_parallel(id, param), iterations)
+}
+
+fn measure_with(run: impl Fn() -> Option<u64>, iterations: u32) -> Option<(f64, f64, u64)> {
+    let checksum = run()?; // warm-up
     let mut total = 0.0;
     let mut best = f64::MAX;
     for _ in 0..iterations.max(1) {
         let t = Instant::now();
-        let c = run_once(id, param)?;
+        let c = run()?;
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         debug_assert_eq!(c, checksum);
         total += ms;
@@ -68,9 +102,9 @@ pub fn measure(id: &str, param: u64, iterations: u32) -> Option<(f64, f64, u64)>
     Some((total / iterations.max(1) as f64, best, checksum))
 }
 
-// ---------------------------------------------------------------- iş yükleri
+// ---------------------------------------------------------------- workloads
 
-/// Özyinelemeli fibonacci: fonksiyon çağrısı maliyeti.
+/// Recursive fibonacci: function call overhead.
 pub fn fib(n: u32) -> u64 {
     if n < 2 {
         n as u64
@@ -79,11 +113,26 @@ pub fn fib(n: u32) -> u64 {
     }
 }
 
-/// `n` adet sözde rastgele u32 üret ve sırala.
-pub fn sort_ints(n: usize) -> u64 {
+fn sort_input(n: usize) -> Vec<u32> {
     let mut rng = XorShift32(0x1234_5678);
-    let mut v: Vec<u32> = (0..n).map(|_| rng.next_u32()).collect();
+    (0..n).map(|_| rng.next_u32()).collect()
+}
+
+/// Generate `n` pseudo-random u32 values and sort them.
+pub fn sort_ints(n: usize) -> u64 {
+    let mut v = sort_input(n);
     v.sort_unstable();
+    sort_checksum(&v)
+}
+
+pub fn sort_ints_par(n: usize) -> u64 {
+    let mut v = sort_input(n);
+    v.par_sort_unstable();
+    sort_checksum(&v)
+}
+
+fn sort_checksum(v: &[u32]) -> u64 {
+    let n = v.len();
     let mut acc: u64 = 0;
     let mut i = 0;
     while i < n {
@@ -93,7 +142,7 @@ pub fn sort_ints(n: usize) -> u64 {
     acc ^ v[n - 1] as u64
 }
 
-/// `n` baytlık deterministik bir tamponun SHA-256 özeti (elle yazılmış, iki dilde aynı).
+/// SHA-256 of a deterministic `n`-byte buffer (hand-written, same in both languages).
 pub fn sha256_buffer(n: usize) -> u64 {
     let data: Vec<u8> = (0..n as u32)
         .map(|i| i.wrapping_mul(31).wrapping_add(7) as u8)
@@ -111,7 +160,7 @@ struct Record {
     tags: Vec<String>,
 }
 
-/// `n` kayıtlık listeyi JSON'a çevir ve geri ayrıştır (serde_json / Codable).
+/// Encode `n` records to JSON and decode them back (serde_json / Codable).
 pub fn json_roundtrip(n: usize) -> u64 {
     let records: Vec<Record> = (0..n as u32)
         .map(|i| Record {
@@ -133,7 +182,7 @@ pub fn json_roundtrip(n: usize) -> u64 {
     })
 }
 
-/// Eratosthenes eleği: `n`'e kadar asal sayı adedi.
+/// Sieve of Eratosthenes: number of primes up to `n`.
 pub fn prime_sieve(n: usize) -> u64 {
     let mut is_composite = vec![false; n + 1];
     let mut count = 0u64;
@@ -152,8 +201,7 @@ pub fn prime_sieve(n: usize) -> u64 {
     count
 }
 
-/// `n x n` f64 matris çarpımı (i-k-j döngü sırası, iki dilde aynı).
-pub fn matmul(n: usize) -> u64 {
+fn matmul_inputs(n: usize) -> (Vec<f64>, Vec<f64>) {
     let mut a = vec![0.0f64; n * n];
     let mut b = vec![0.0f64; n * n];
     for i in 0..n {
@@ -162,20 +210,42 @@ pub fn matmul(n: usize) -> u64 {
             b[i * n + j] = ((i + j) % 5) as f64 - 1.0;
         }
     }
-    let mut c = vec![0.0f64; n * n];
-    for i in 0..n {
-        for k in 0..n {
-            let aik = a[i * n + k];
-            for j in 0..n {
-                c[i * n + j] += aik * b[k * n + j];
-            }
+    (a, b)
+}
+
+/// One output row of C = A·B (i-k-j order; inner loop over contiguous slices vectorizes).
+fn matmul_row(a: &[f64], b: &[f64], n: usize, i: usize, row: &mut [f64]) {
+    for k in 0..n {
+        let aik = a[i * n + k];
+        let brow = &b[k * n..(k + 1) * n];
+        for (c, &bv) in row.iter_mut().zip(brow) {
+            *c += aik * bv;
         }
+    }
+}
+
+/// `n x n` f64 matrix multiply (i-k-j loop order, same in both languages).
+pub fn matmul(n: usize) -> u64 {
+    let (a, b) = matmul_inputs(n);
+    let mut c = vec![0.0f64; n * n];
+    for (i, row) in c.chunks_exact_mut(n).enumerate() {
+        matmul_row(&a, &b, n, i, row);
     }
     let sum: f64 = c.iter().sum();
     sum as i64 as u64
 }
 
-/// `n` adet anahtarı say: HashMap ekleme/güncelleme.
+pub fn matmul_par(n: usize) -> u64 {
+    let (a, b) = matmul_inputs(n);
+    let mut c = vec![0.0f64; n * n];
+    c.par_chunks_exact_mut(n)
+        .enumerate()
+        .for_each(|(i, row)| matmul_row(&a, &b, n, i, row));
+    let sum: f64 = c.iter().sum();
+    sum as i64 as u64
+}
+
+/// Count `n` keys: HashMap insert/update.
 pub fn hashmap_count(n: usize) -> u64 {
     let mut rng = XorShift32(0xC0FF_EE11);
     let mut map: HashMap<u32, u32> = HashMap::new();

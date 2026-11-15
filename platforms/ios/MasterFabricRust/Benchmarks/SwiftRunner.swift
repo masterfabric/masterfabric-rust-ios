@@ -1,12 +1,12 @@
 import Foundation
 
-/// Rust çekirdeğinin, aynı testi Swift ile ölçmek için çağırdığı nesne.
-/// Rust bunu kendi arka plan thread'inden çağırır; ana thread hiç bloklanmaz.
+/// Object the Rust core calls to measure the same workload in Swift.
+/// Rust calls it from its own background thread; the main thread is never blocked.
 final class SwiftRunner: SwiftBenchRunner, @unchecked Sendable {
     func language() -> String { "Swift" }
 
     func run(benchId: String, param: UInt64, iterations: UInt32) -> BenchMeasurement? {
-        assert(!Thread.isMainThread, "benchmark ana thread'de çalışmamalı")
+        assert(!Thread.isMainThread, "benchmark must not run on the main thread")
         return SwiftWorkloads.measure(benchId, param: param, iterations: iterations)
     }
 }

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Uygulamayı simülatörde derler, kurar ve açar.
-# Açık bir simülatör varsa onu kullanır; yoksa SIM_NAME (varsayılan "iPhone Duo") açılır.
+# Açık bir simülatör varsa onu kullanır; yoksa SIM_NAME (varsayılan "iPhone 18 Pro") açılır.
 # Ek argümanlar uygulamaya iletilir, ör.:  scripts/run-sim.sh -startScreen benchmark -autorun YES
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -10,7 +10,7 @@ BUNDLE_ID=co.masterfabric.rustios
 
 SIM_ID="$(xcrun simctl list devices booted | grep -Eo '\(([0-9A-F-]{36})\)' | head -1 | tr -d '()' || true)"
 if [ -z "$SIM_ID" ]; then
-  NAME="${SIM_NAME:-iPhone Duo}"
+  NAME="${SIM_NAME:-iPhone 18 Pro}"
   SIM_ID="$(xcrun simctl list devices available | grep -F "$NAME (" | grep -Eo '[0-9A-F-]{36}' | head -1)"
   echo "==> Simülatör açılıyor: $NAME ($SIM_ID)"
   xcrun simctl boot "$SIM_ID"

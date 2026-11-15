@@ -1,4 +1,4 @@
-//! Detay sayfası view-model'i.
+//! Detail screen view model.
 
 use super::home::ItemRow;
 use crate::store::items::{Item, ItemStore};
@@ -17,9 +17,9 @@ impl DetailViewModel {
         Some(Self {
             key: crate::Route::Detail { item_id }.key(),
             favorite_label: if item.favorite {
-                "Favorilerden çıkar"
+                "Remove from favorites"
             } else {
-                "Favorilere ekle"
+                "Add to favorites"
             }
             .to_string(),
             related: store

@@ -1,4 +1,4 @@
-//! Veri katmanı ("store"). Discord'daki store yapısı gibi tek doğruluk kaynağı.
+//! Data layer ("store"): the single source of truth for app data.
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Item {
@@ -7,7 +7,7 @@ pub struct Item {
     pub subtitle: String,
     pub body: String,
     pub category: String,
-    /// SF Symbol adı (iOS) — Android tarafında eşleşen ikon seçilir.
+    /// SF Symbol name (iOS); Android maps it to a matching icon.
     pub symbol: String,
     pub tags: Vec<String>,
     pub favorite: bool,
@@ -23,9 +23,9 @@ impl ItemStore {
         Self { items }
     }
 
-    /// Örnek veri: Rust ile yapılabilecek projeler.
+    /// Sample data: projects you can build with Rust.
     pub fn seeded() -> Self {
-        // (başlık, alt başlık, açıklama, kategori, SF Symbol, etiketler)
+        // (title, subtitle, body, category, SF Symbol, tags)
         type Seed = (
             &'static str,
             &'static str,
@@ -36,66 +36,66 @@ impl ItemStore {
         );
         let raw: &[Seed] = &[
             (
-                "Paylaşılan Rust Çekirdeği",
-                "Discord modeli: tek çekirdek, yerel ekranlar",
-                "Durum, navigasyon ve iş kuralları Rust'ta; iOS ve Android yalnızca çizer. Bu uygulamanın kendisi bu modelle yazıldı.",
-                "Mobil",
+                "Shared Rust Core",
+                "One core, native screens",
+                "State, navigation and business rules live in Rust; iOS and Android only render. This app itself is built this way.",
+                "Mobile",
                 "square.stack.3d.up.fill",
                 &["uniffi", "swiftui", "compose"],
             ),
             (
-                "ESP32-C6 Sensör Düğümü",
-                "Embassy + esp-hal ile no_std",
-                "Sıcaklık ve nemi ölçüp BLE ile telefona gönderen düşük güçlü gömülü cihaz.",
-                "Gömülü",
+                "ESP32-C6 Sensor Node",
+                "no_std with Embassy + esp-hal",
+                "A low-power embedded device that measures temperature and humidity and sends it to a phone over BLE.",
+                "Embedded",
                 "sensor.fill",
                 &["embassy", "ble", "no_std"],
             ),
             (
-                "Raspberry Pi 5 Robot Beyni",
-                "Kamera, yol bulma, Wi‑Fi kontrol",
-                "Linux üzerinde Rust servisleri; motorları UART ile Pico 2'ye devreder.",
-                "Robotik",
+                "Raspberry Pi 5 Robot Brain",
+                "Camera, path finding, Wi-Fi control",
+                "Rust services on Linux; delegates motor control to a Pico 2 over UART.",
+                "Robotics",
                 "cpu.fill",
                 &["rppal", "tokio", "uart"],
             ),
             (
-                "Pico 2 Motor Kontrolcüsü",
-                "RP2350 üzerinde gerçek zamanlı döngü",
-                "PWM ile motor sürme, enkoder okuma ve PID kontrol. embassy-rp ile async.",
-                "Gömülü",
+                "Pico 2 Motor Controller",
+                "Real-time loop on the RP2350",
+                "PWM motor driving, encoder reading and PID control. Async with embassy-rp.",
+                "Embedded",
                 "gearshape.2.fill",
                 &["embassy-rp", "pwm", "pid"],
             ),
             (
-                "Hızlı CLI Araçları",
-                "Tek dosya, bağımlılıksız çıktı",
-                "Büyük log ve CSV dosyalarını tarayan, filtreleyen ve raporlayan komut satırı araçları.",
-                "Araçlar",
+                "Fast CLI Tools",
+                "Single binary, no dependencies",
+                "Command-line tools that scan, filter and report on large log and CSV files.",
+                "Tools",
                 "terminal.fill",
                 &["clap", "rayon"],
             ),
             (
-                "Yerel AI Sunucu Paneli",
-                "Mac'lerdeki modelleri tek ekranda izle",
-                "Ağdaki AI sunucularının durumunu, GPU/RAM kullanımını ve kuyruğunu gösteren küçük bir servis.",
-                "Araçlar",
+                "Local AI Server Dashboard",
+                "Monitor models on your Macs in one screen",
+                "A small service that shows status, GPU/RAM usage and queues of AI servers on the network.",
+                "Tools",
                 "chart.xyaxis.line",
                 &["axum", "tokio"],
             ),
             (
-                "Şifreli Senkronizasyon",
-                "libsignal / 1Password yaklaşımı",
-                "Uçtan uca şifreli, yalnızca değişen parçaları aktaran yedekleme ve senkronizasyon çekirdeği.",
-                "Mobil",
+                "Encrypted Sync",
+                "End-to-end encrypted core",
+                "An end-to-end encrypted backup and sync core that only transfers changed chunks.",
+                "Mobile",
                 "lock.shield.fill",
                 &["crypto", "sqlite"],
             ),
             (
-                "Bevy ile 2D Oyun",
-                "ECS mimarisi, Metal üzerinde",
-                "Rust'ın oyun motoru Bevy ile fizik ve simülasyon denemeleri.",
-                "Oyun",
+                "2D Game with Bevy",
+                "ECS architecture on Metal",
+                "Physics and simulation experiments with Rust's Bevy game engine.",
+                "Games",
                 "gamecontroller.fill",
                 &["bevy", "ecs"],
             ),
@@ -127,15 +127,15 @@ impl ItemStore {
         self.items.iter().find(|i| i.id == id)
     }
 
-    /// Favori durumunu değiştirir. Öğe yoksa `None`, varsa yeni durum.
+    /// Toggles favorite. `None` if the item does not exist, otherwise the new state.
     pub fn toggle_favorite(&mut self, id: u32) -> Option<bool> {
         let item = self.items.iter_mut().find(|i| i.id == id)?;
         item.favorite = !item.favorite;
         Some(item.favorite)
     }
 
-    /// İş kuralı: arama başlık, alt başlık, kategori ve etiketlerde (büyük/küçük harf
-    /// duyarsız) yapılır; favoriler önce, sonra id sırası.
+    /// Business rule: search is case-insensitive over title, subtitle, category and tags;
+    /// favorites first, then by id.
     pub fn visible(&self, query: &str) -> Vec<&Item> {
         let q = query.trim().to_lowercase();
         let mut out: Vec<&Item> = self

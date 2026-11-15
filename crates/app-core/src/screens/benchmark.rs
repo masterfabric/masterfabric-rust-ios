@@ -1,5 +1,5 @@
-//! Benchmark ekranının durumu ve iş kuralları.
-//! Hangi testlerin olduğu, parametreleri, sonuçların yorumu Rust'ta tanımlıdır.
+//! Benchmark screen state and business rules: which tests exist, their parameters,
+//! categories, order, and how results are interpreted all live in Rust.
 
 use crate::app::Measurement;
 use crate::workloads;
@@ -23,74 +23,174 @@ pub struct BenchSpec {
     pub param: u64,
     pub param_label: &'static str,
     pub iterations: u32,
+    pub category: &'static str,
+    /// Also measured with a multi-threaded (rayon) Rust variant.
+    pub parallel: bool,
 }
 
-/// Tek kaynak: testler ve parametreleri.
+pub const MEDIA: &str = "Media";
+pub const GENERAL: &str = "General";
+
+/// Single source of truth for tests and parameters. Media is the featured category (first).
 pub fn specs() -> Vec<BenchSpec> {
+    use workloads::*;
+    #[allow(clippy::too_many_arguments)]
+    fn spec(
+        category: &'static str,
+        id: &'static str,
+        name: &'static str,
+        description: &'static str,
+        symbol: &'static str,
+        param: u64,
+        param_label: &'static str,
+        iterations: u32,
+        parallel: bool,
+    ) -> BenchSpec {
+        BenchSpec {
+            id,
+            name,
+            description,
+            symbol,
+            param,
+            param_label,
+            iterations,
+            category,
+            parallel,
+        }
+    }
     vec![
-        BenchSpec {
-            id: workloads::FIB,
-            name: "Fibonacci (özyineleme)",
-            description: "fib(30) — fonksiyon çağrısı yükü",
-            symbol: "function",
-            param: 30,
-            param_label: "n = 30",
-            iterations: 10,
-        },
-        BenchSpec {
-            id: workloads::SORT,
-            name: "1M tamsayı sıralama",
-            description: "xorshift ile üret + sırala",
-            symbol: "arrow.up.arrow.down",
-            param: 1_000_000,
-            param_label: "1.000.000 × u32",
-            iterations: 5,
-        },
-        BenchSpec {
-            id: workloads::SHA256,
-            name: "SHA-256",
-            description: "1 MiB tampon, elle yazılmış (iki dilde aynı)",
-            symbol: "number.square",
-            param: 1 << 20,
-            param_label: "1 MiB",
-            iterations: 10,
-        },
-        BenchSpec {
-            id: workloads::JSON,
-            name: "JSON yaz + oku",
-            description: "serde_json vs Codable, 5.000 kayıt",
-            symbol: "curlybraces",
-            param: 5_000,
-            param_label: "5.000 kayıt",
-            iterations: 5,
-        },
-        BenchSpec {
-            id: workloads::SIEVE,
-            name: "Asal elek",
-            description: "Eratosthenes, 5.000.000'a kadar",
-            symbol: "square.grid.3x3",
-            param: 5_000_000,
-            param_label: "n = 5.000.000",
-            iterations: 10,
-        },
-        BenchSpec {
-            id: workloads::MATMUL,
-            name: "Matris çarpımı",
-            description: "200×200 f64, i-k-j döngüsü",
-            symbol: "tablecells",
-            param: 200,
-            param_label: "200 × 200",
-            iterations: 10,
-        },
-        BenchSpec {
-            id: workloads::HASHMAP,
-            name: "HashMap sayımı",
-            description: "300.000 ekleme, 65.536 anahtar",
-            symbol: "tray.full",
-            param: 300_000,
-            param_label: "300.000 ekleme",
-            iterations: 10,
-        },
+        spec(
+            MEDIA,
+            RAYTRACE,
+            "Ray tracing",
+            "4 spheres + floor, shadows, 2 reflections, 4 samples/pixel",
+            "camera.aperture",
+            256,
+            "256 × 256",
+            3,
+            true,
+        ),
+        spec(
+            MEDIA,
+            RASTER,
+            "Triangle rasterization",
+            "3,000 triangles, z-buffer, 512 × 512",
+            "triangle.fill",
+            3_000,
+            "3,000 triangles",
+            5,
+            true,
+        ),
+        spec(
+            MEDIA,
+            IMAGE,
+            "Image processing",
+            "1024² RGB: gaussian blur → bilinear 512² → color LUT → YUV",
+            "photo.on.rectangle.angled",
+            1024,
+            "1024 × 1024",
+            3,
+            true,
+        ),
+        spec(
+            MEDIA,
+            VIDEO,
+            "Video processing",
+            "30 frames 640×360: YUV + blur + frame diff + motion estimation",
+            "film.stack",
+            30,
+            "30 frames",
+            3,
+            true,
+        ),
+        spec(
+            MEDIA,
+            MESH,
+            "3D model generation",
+            "icosphere (5 levels) + displacement + normals + OBJ export",
+            "cube.transparent",
+            5,
+            "20,480 triangles",
+            5,
+            false,
+        ),
+        spec(
+            GENERAL,
+            FIB,
+            "Fibonacci (recursion)",
+            "fib(30) — function call overhead",
+            "function",
+            30,
+            "n = 30",
+            10,
+            false,
+        ),
+        spec(
+            GENERAL,
+            SORT,
+            "Sort 1M integers",
+            "generate with xorshift + sort",
+            "arrow.up.arrow.down",
+            1_000_000,
+            "1,000,000 × u32",
+            5,
+            true,
+        ),
+        spec(
+            GENERAL,
+            SHA256,
+            "SHA-256",
+            "1 MiB buffer, hand-written (same in both languages)",
+            "number.square",
+            1 << 20,
+            "1 MiB",
+            10,
+            false,
+        ),
+        spec(
+            GENERAL,
+            JSON,
+            "JSON encode + decode",
+            "serde_json vs Codable, 5,000 records",
+            "curlybraces",
+            5_000,
+            "5,000 records",
+            5,
+            false,
+        ),
+        spec(
+            GENERAL,
+            SIEVE,
+            "Prime sieve",
+            "Eratosthenes up to 5,000,000",
+            "square.grid.3x3",
+            5_000_000,
+            "n = 5,000,000",
+            10,
+            false,
+        ),
+        spec(
+            GENERAL,
+            MATMUL,
+            "Matrix multiply",
+            "200×200 f64, i-k-j loop order",
+            "tablecells",
+            200,
+            "200 × 200",
+            10,
+            true,
+        ),
+        spec(
+            GENERAL,
+            HASHMAP,
+            "HashMap counting",
+            "300,000 inserts, 65,536 keys",
+            "tray.full",
+            300_000,
+            "300,000 inserts",
+            10,
+            false,
+        ),
     ]
 }
 
@@ -103,11 +203,18 @@ pub struct BenchRow {
     pub param: u64,
     pub param_label: String,
     pub iterations: u32,
+    pub category: String,
+    pub has_parallel: bool,
     pub status: BenchStatus,
+    /// Single-thread Rust (apples-to-apples with Swift).
     pub rust: Option<Measurement>,
+    /// Multi-threaded Rust (rayon). Not used in the Rust-vs-Swift ratio.
+    pub rust_parallel: Option<Measurement>,
     pub swift: Option<Measurement>,
-    /// swift_ortalama / rust_ortalama. >1 ise Rust daha hızlı.
+    /// swift_avg / rust_avg (single-thread). > 1 means Rust is faster.
     pub ratio: Option<f64>,
+    /// rust_avg / rust_parallel_avg.
+    pub parallel_speedup: Option<f64>,
     pub verdict: Option<String>,
     pub checksum_match: Option<bool>,
 }
@@ -122,23 +229,35 @@ impl BenchRow {
             param: s.param,
             param_label: s.param_label.to_string(),
             iterations: s.iterations,
+            category: s.category.to_string(),
+            has_parallel: s.parallel,
             status: BenchStatus::Idle,
             rust: None,
+            rust_parallel: None,
             swift: None,
             ratio: None,
+            parallel_speedup: None,
             verdict: None,
             checksum_match: None,
         }
     }
 
-    /// Her iki ölçüm de geldiğinde oranı ve yorumu hesapla.
+    /// Compute ratio, speedup and verdict once measurements are in.
     pub fn finalize(&mut self) {
+        self.parallel_speedup = match (&self.rust, &self.rust_parallel) {
+            (Some(r), Some(p)) if p.avg_ms > 0.0 => Some(r.avg_ms / p.avg_ms),
+            _ => None,
+        };
         match (&self.rust, &self.swift) {
             (Some(r), Some(s)) if r.avg_ms > 0.0 && s.avg_ms > 0.0 => {
                 let ratio = s.avg_ms / r.avg_ms;
                 self.ratio = Some(ratio);
                 self.verdict = Some(verdict(ratio));
-                self.checksum_match = Some(r.checksum == s.checksum);
+                let par_ok = self
+                    .rust_parallel
+                    .as_ref()
+                    .is_none_or(|p| p.checksum == r.checksum);
+                self.checksum_match = Some(r.checksum == s.checksum && par_ok);
             }
             _ => {
                 self.ratio = None;
@@ -151,11 +270,11 @@ impl BenchRow {
 
 pub fn verdict(ratio: f64) -> String {
     if (0.95..=1.05).contains(&ratio) {
-        "≈ eşit".to_string()
+        "≈ equal".to_string()
     } else if ratio > 1.0 {
-        format!("Rust {ratio:.2}× hızlı")
+        format!("Rust {ratio:.2}× faster")
     } else {
-        format!("Swift {:.2}× hızlı", 1.0 / ratio)
+        format!("Swift {:.2}× faster", 1.0 / ratio)
     }
 }
 
@@ -170,6 +289,7 @@ pub struct BenchmarkViewState {
     pub summary: Option<String>,
     pub rust_profile: String,
     pub core_info: String,
+    pub rust_threads: u32,
     pub swift_runner_attached: bool,
 }
 
@@ -201,7 +321,7 @@ impl BenchmarkState {
         self.rows.iter_mut().find(|r| r.id == id)
     }
 
-    /// Çalıştırma sırasını hazırla. Zaten çalışıyorsa ya da id geçersizse `None`.
+    /// Prepare a run. `None` if already running or no valid ids.
     pub fn begin(&mut self, ids: Vec<String>) -> Option<Vec<String>> {
         if self.running {
             return None;
@@ -213,16 +333,19 @@ impl BenchmarkState {
         if ids.is_empty() {
             return None;
         }
+        let mut steps = 0;
         for id in &ids {
             if let Some(row) = self.row_mut(id) {
                 row.status = BenchStatus::Queued;
                 row.rust = None;
+                row.rust_parallel = None;
                 row.swift = None;
                 row.finalize();
+                steps += if row.has_parallel { 3 } else { 2 };
             }
         }
         self.running = true;
-        self.steps_total = ids.len() as u32 * 2;
+        self.steps_total = steps;
         self.steps_done = 0;
         self.current_label = None;
         Some(ids)
@@ -234,7 +357,7 @@ impl BenchmarkState {
         }
     }
 
-    /// Tamamlanan testlerin oranlarının geometrik ortalaması.
+    /// Geometric mean of the completed single-thread ratios.
     pub fn summary(&self) -> Option<String> {
         let ratios: Vec<f64> = self.rows.iter().filter_map(|r| r.ratio).collect();
         if ratios.is_empty() {
@@ -242,7 +365,7 @@ impl BenchmarkState {
         }
         let geo = (ratios.iter().map(|r| r.ln()).sum::<f64>() / ratios.len() as f64).exp();
         Some(format!(
-            "Geometrik ortalama ({} test): {}",
+            "Geometric mean ({} tests): {}",
             ratios.len(),
             verdict(geo)
         ))
@@ -259,13 +382,14 @@ impl BenchmarkState {
                     0.0
                 }
             } else {
-                self.steps_done as f64 / self.steps_total as f64
+                (self.steps_done as f64 / self.steps_total as f64).min(1.0)
             },
             current_label: self.current_label.clone(),
             last_total_ms: self.last_total_ms,
             summary: self.summary(),
             rust_profile: crate::rust_profile().to_string(),
             core_info: crate::build_info(),
+            rust_threads: rayon::current_num_threads() as u32,
             swift_runner_attached,
         }
     }

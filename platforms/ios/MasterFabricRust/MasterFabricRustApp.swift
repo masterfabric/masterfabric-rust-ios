@@ -8,7 +8,12 @@ struct MasterFabricRustApp: App {
         WindowGroup {
             RootView()
                 .environment(bridge)
-                .task { bridge.applyLaunchOptions() }
+                .onAppear {
+                    if Perf.launchToFirstFrameMs == nil, let start = Perf.processStart {
+                        Perf.launchToFirstFrameMs = (Perf.nowEpoch() - start) * 1000
+                    }
+                }
+                .task { await bridge.applyLaunchOptions() }
         }
     }
 }

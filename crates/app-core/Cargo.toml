@@ -1,6 +1,6 @@
 [package]
 name = "app-core"
-description = "MasterFabric Rust: platformdan bağımsız uygulama çekirdeği (durum, navigasyon, veri, iş kuralları, benchmark)"
+description = "MasterFabric Rust: platform-independent app core (state, navigation, data, business rules, benchmarks)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,3 +8,4 @@ license.workspace = true
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
+rayon = "1.12"

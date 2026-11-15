@@ -1,6 +1,6 @@
 [package]
 name = "app-ffi"
-description = "UniFFI köprüsü: app-core'u Swift/Kotlin'e açar"
+description = "UniFFI bridge exposing app-core to Swift/Kotlin"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

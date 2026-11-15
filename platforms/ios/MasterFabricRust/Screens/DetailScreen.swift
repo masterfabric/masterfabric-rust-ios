@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 2. sayfa: detay. Favori kuralı ve ilgili öğeler Rust'ta hesaplanır.
+/// Page 2: detail. The favorite rule and related items are computed in Rust.
 struct DetailScreen: View {
     @Environment(CoreBridge.self) private var bridge
     let detail: DetailState
@@ -44,7 +44,7 @@ struct DetailScreen: View {
 
                 if !detail.related.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("Aynı kategoriden").font(.headline)
+                        Text("More in this category").font(.headline)
                         ForEach(detail.related, id: \.id) { row in
                             Button {
                                 bridge.dispatch(.openDetail(itemId: row.id))
@@ -58,7 +58,7 @@ struct DetailScreen: View {
                     }
                 }
 
-                Text("Bu ekranın tüm verisi Rust `DetailViewModel`'den geliyor · \(detail.key)")
+                Text("All data on this screen comes from the Rust `DetailViewModel` · \(detail.key)")
                     .font(.caption2.monospaced())
                     .foregroundStyle(.tertiary)
             }

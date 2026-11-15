@@ -1,10 +1,10 @@
 import Foundation
 
-// Rust'taki `crates/app-core/src/workloads.rs` dosyasının birebir Swift karşılığı.
-// Aynı algoritma, aynı veri, aynı checksum. Kod idiomatic Swift (unsafe pointer yok),
-// Rust tarafı da idiomatic Rust: "dil + standart kütüphane" karşılaştırması.
+// One-to-one Swift port of `crates/app-core/src/workloads.rs`.
+// Same algorithm, same data, same checksum. Idiomatic Swift (no unsafe pointers);
+// the Rust side is idiomatic Rust too: a "language + standard library" comparison.
 
-/// Sonuçların optimize edilip silinmesini engeller.
+/// Prevents results from being optimized away.
 private var benchmarkSink: UInt64 = 0
 @inline(never) func blackHole(_ x: UInt64) { benchmarkSink ^= x }
 
@@ -30,11 +30,16 @@ enum SwiftWorkloads {
         case "sieve": return primeSieve(Int(param))
         case "matmul": return matmul(Int(param))
         case "hashmap": return hashmapCount(Int(param))
+        case "raytrace": return SwiftMedia.raytraceBench(Int(param))
+        case "raster": return SwiftMedia.rasterize(Int(param))
+        case "image": return SwiftMedia.imagePipeline(Int(param))
+        case "video": return SwiftMedia.videoPipeline(Int(param))
+        case "mesh": return SwiftMedia.generateMesh(Int(param)).checksum
         default: return nil
         }
     }
 
-    /// 1 ısınma + `iterations` ölçüm (Rust'taki `measure` ile aynı).
+    /// 1 warm-up + `iterations` measured runs (same as Rust `measure`).
     static func measure(_ id: String, param: UInt64, iterations: UInt32) -> BenchMeasurement? {
         guard let checksum = runOnce(id, param) else { return nil }
         let n = max(iterations, 1)
@@ -51,7 +56,7 @@ enum SwiftWorkloads {
         return BenchMeasurement(avgMs: total / Double(n), minMs: best, iterations: iterations, checksum: checksum)
     }
 
-    // MARK: İş yükleri
+    // MARK: Workloads
 
     static func fib(_ n: UInt32) -> UInt64 {
         n < 2 ? UInt64(n) : fib(n - 1) + fib(n - 2)
@@ -154,8 +159,8 @@ enum SwiftWorkloads {
     }
 }
 
-/// Elle yazılmış SHA-256 (Rust sürümüyle aynı). CryptoKit kullanılmadı: o donanım
-/// hızlandırmalı olduğu için dil karşılaştırmasını bozar.
+/// Hand-written SHA-256 (same as the Rust version). CryptoKit is not used: it is hardware
+/// accelerated and would skew a language comparison.
 enum SHA256Swift {
     static let k: [UInt32] = [
         0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,

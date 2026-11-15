@@ -1,24 +1,34 @@
-//! Kullanıcı olayları. Platform katmanı yalnızca bunları gönderir.
+//! User events. The platform layer only sends these.
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Action {
-    /// Ana sayfadaki bir öğeye dokunuldu.
+    /// An item on Home was tapped.
     OpenDetail { item_id: u32 },
-    /// Benchmark ekranını aç.
+    /// Open the benchmark screen.
     OpenBenchmark,
-    /// Bir ekran geri git.
+    /// Open the "What can you build with Rust?" info screen.
+    OpenInfo,
+    /// Go back one screen.
     Back,
-    /// Platformun navigasyon yığını kısaldığında (ör. kaydırarak geri) senkronize et.
-    /// `path_len`: kökten (Home) sonraki ekran sayısı.
+    /// Sync when the platform navigation stack shrinks (e.g. swipe back).
+    /// `path_len`: number of screens after the root (Home).
     PopTo { path_len: u32 },
-    /// Ana sayfa arama metni.
+    /// Home search text.
     SetQuery { query: String },
-    /// Favori aç/kapat (iş kuralı: favoriler listede üstte).
+    /// Toggle favorite (business rule: favorites are listed first).
     ToggleFavorite { item_id: u32 },
-    /// Tek bir benchmark'ı çalıştır.
+    /// Run one benchmark.
     RunBenchmark { id: String },
-    /// Tüm benchmark'ları sırayla çalıştır.
+    /// Run all benchmarks in order.
     RunAllBenchmarks,
-    /// Benchmark sonuçlarını temizle.
+    /// Clear benchmark results.
     ResetBenchmarks,
+    /// Record a platform-measured performance metric (launch time, latency, ...).
+    RecordPerf {
+        id: String,
+        label: String,
+        value: f64,
+        unit: String,
+        detail: String,
+    },
 }

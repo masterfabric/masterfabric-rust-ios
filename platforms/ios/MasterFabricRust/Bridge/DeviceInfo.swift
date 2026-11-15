@@ -1,7 +1,7 @@
 import Foundation
 import UIKit
 
-/// Benchmark ekranında gösterilen cihaz / derleme bilgisi.
+/// Device / build info shown on the benchmark screen.
 enum DeviceInfo {
     static var isSimulator: Bool {
         #if targetEnvironment(simulator)

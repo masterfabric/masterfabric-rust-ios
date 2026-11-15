@@ -17,3 +17,8 @@ opt-level = 3
 lto = "fat"
 codegen-units = 1
 debug = false
+# UniFFI catches panics with catch_unwind and turns them into errors; with "abort" a
+# Rust panic terminates the app instead. The core has no expected panics, so we trade
+# that for smaller/faster code (no unwind tables / landing pads).
+panic = "abort"
+strip = true

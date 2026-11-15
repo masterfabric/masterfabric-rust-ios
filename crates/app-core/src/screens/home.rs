@@ -1,4 +1,4 @@
-//! Ana sayfa view-model'i. SwiftUI bunu olduğu gibi çizer.
+//! Home view model. SwiftUI renders it as is.
 
 use crate::store::items::{Item, ItemStore};
 
@@ -32,7 +32,7 @@ pub struct HomeViewModel {
     pub rows: Vec<ItemRow>,
     pub total_count: u32,
     pub favorite_count: u32,
-    /// Liste boşsa gösterilecek metin (ör. arama sonucu yok).
+    /// Text to show when the list is empty (e.g. no search results).
     pub empty_message: Option<String>,
 }
 
@@ -45,7 +45,7 @@ impl HomeViewModel {
             .collect();
         let empty_message = rows
             .is_empty()
-            .then(|| format!("\"{}\" için sonuç yok", query.trim()));
+            .then(|| format!("No results for \"{}\"", query.trim()));
         Self {
             title: "MasterFabric Rust".to_string(),
             query: query.to_string(),
