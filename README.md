@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/hero.png" alt="MasterFabric Rust: Swift + Rust, native SwiftUI on a shared Rust core" width="100%"></p>
+
 # MasterFabric · Swift + Rust (iOS)
 
 A shared Rust core with a native SwiftUI UI. State, navigation, data, business rules and
