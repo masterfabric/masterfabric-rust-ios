@@ -63,8 +63,18 @@ final class CoreBridge {
         if let v = u.perf { perf = v }
         if let v = u.benchmark {
             let finished = benchmark.running && !v.running
+            let ffiFinished = benchmark.ffi.running && !v.ffi.running
             benchmark = v
-            if finished { exportPerf() }
+            if finished {
+                exportPerf()
+                // `-autorun YES -ffiAutorun YES`: run test #37 after the compute tests, so its
+                // break-even uses the measured compute geomean.
+                if UserDefaults.standard.bool(forKey: "ffiAutorun"), !ffiAutorunDone {
+                    ffiAutorunDone = true
+                    DispatchQueue.main.async { self.dispatch(.runFfiBench) }
+                }
+            }
+            if ffiFinished { exportFfi() }
         }
     }
 
@@ -195,9 +205,30 @@ final class CoreBridge {
         Perf.export(out)
     }
 
+    /// Test #37 results → Documents/ffi.json (automation, see scripts/measure-ffi.sh).
+    func exportFfi() {
+        let f = benchmark.ffi
+        let rows: [[String: Any]] = f.rows.map { r in
+            var d: [String: Any] = ["id": r.id, "group": r.group, "case": r.caseId, "calls": r.calls, "reps": r.reps]
+            if let s = r.swiftInline { d["swift_inline_ns"] = s.nsPerCall }
+            if let s = r.rustPerCall { d["rust_per_call_ns"] = s.nsPerCall }
+            if let s = r.rustBatched { d["rust_batched_ns"] = s.nsPerCall }
+            if let x = r.overheadNs { d["overhead_ns"] = x }
+            if let c = r.checksumMatch { d["checksum_match"] = c }
+            return d
+        }
+        var out: [String: Any] = ["rows": rows, "simulator": DeviceInfo.isSimulator]
+        if let c = f.crossingNs { out["crossing_ns"] = c }
+        if let s = f.summary { out["summary"] = s }
+        if let t = f.lastTotalMs { out["total_ms"] = t }
+        Perf.export(out, file: "ffi.json")
+    }
+
     // MARK: Launch arguments for debugging / automation
     //   -startScreen home|detail|benchmark|info   -detailId 2   -autorun YES   -query embassy   -probe YES
+    //   -ffiAutorun YES (test #37)   -scrollTo ffi
     @ObservationIgnored private var launchApplied = false
+    @ObservationIgnored private var ffiAutorunDone = false
 
     @MainActor
     func applyLaunchOptions() async {
@@ -222,6 +253,9 @@ final class CoreBridge {
         }
         if d.bool(forKey: "autorun") {
             dispatch(.runAllBenchmarks)
+        } else if d.bool(forKey: "ffiAutorun") {
+            ffiAutorunDone = true
+            dispatch(.runFfiBench)
         }
     }
 }

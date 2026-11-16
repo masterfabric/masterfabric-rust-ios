@@ -4,6 +4,7 @@ import SwiftUI
 /// Benchmark screen. Test list, categories, order, progress, ratios and verdicts live in Rust;
 /// measurements run on a background thread (Rust single-thread, Rust rayon, then the same
 /// algorithm in Swift). 36 tests in 8 categories; run all, one category, or one test.
+/// Test #37 (FFI boundary / chatty calls) is its own section: `FfiSectionView`.
 struct BenchmarkScreen: View {
     @Environment(CoreBridge.self) private var bridge
     @State private var chartCategory = "Image"
@@ -11,6 +12,7 @@ struct BenchmarkScreen: View {
     var body: some View {
         let b = bridge.benchmark
         let categories = orderedCategories(b.rows)
+        let busy = b.running || b.ffi.running
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
@@ -29,14 +31,15 @@ struct BenchmarkScreen: View {
                     DurationChartCard(rows: b.rows, categories: categories, selection: $chartCategory)
                     SectionTitle(title: "App performance", symbol: "gauge.with.dots.needle.67percent").id("perf")
                     AppPerfCard()
+                    FfiSectionView(ffi: b.ffi, busy: busy)
                     ForEach(categories, id: \.self) { cat in
-                        CategoryHeader(category: cat, rows: b.rows.filter { $0.category == cat }, running: b.running) {
+                        CategoryHeader(category: cat, rows: b.rows.filter { $0.category == cat }, running: busy) {
                             bridge.dispatch(.runCategory(category: cat))
                         }
                         .id("cat-" + cat)
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 330), spacing: 12)], spacing: 12) {
                             ForEach(b.rows.filter { $0.category == cat }, id: \.id) { row in
-                                BenchCard(row: row, threads: b.rustThreads, disabled: b.running) {
+                                BenchCard(row: row, threads: b.rustThreads, disabled: busy) {
                                     bridge.dispatch(.runBenchmark(id: row.id))
                                 }
                                 .id(row.id)
@@ -52,6 +55,13 @@ struct BenchmarkScreen: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .background(Color(.systemGroupedBackground))
+            .onChange(of: b.ffi.running) { _, running in
+                if !running, let target = UserDefaults.standard.string(forKey: "scrollTo") {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                        proxy.scrollTo(target, anchor: .top)
+                    }
+                }
+            }
             .onChange(of: b.running) { _, running in
                 // Debug/automation: `-scrollTo <target>` scrolls there when the run finishes.
                 if !running, let target = UserDefaults.standard.string(forKey: "scrollTo") {
@@ -66,7 +76,7 @@ struct BenchmarkScreen: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Reset") { bridge.dispatch(.resetBenchmarks) }
-                    .disabled(b.running)
+                    .disabled(b.running || b.ffi.running)
             }
         }
     }
@@ -84,7 +94,7 @@ struct BenchmarkScreen: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-            .disabled(b.running)
+            .disabled(b.running || b.ffi.running)
             .accessibilityIdentifier("run-all")
 
             if b.running || b.progress > 0 {
@@ -194,7 +204,7 @@ private struct CategoryRunGrid: View {
                     .background(.background, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
                 .buttonStyle(.plain)
-                .disabled(bench.running)
+                .disabled(bench.running || bench.ffi.running)
                 .accessibilityIdentifier("run-category-" + cat)
             }
         }
