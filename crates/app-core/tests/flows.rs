@@ -1,7 +1,8 @@
 //! Tests screen flows without any UI (a big win of the shared-core architecture).
 
 use app_core::{
-    Action, App, AppObserver, BenchStatus, ExternalBenchRunner, Measurement, Route, ViewUpdate,
+    Action, App, AppObserver, BenchStatus, ExternalBenchRunner, FfiSample, Measurement, Route,
+    ViewUpdate,
 };
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -153,6 +154,57 @@ impl ExternalBenchRunner for FakeSwift {
             checksum,
         })
     }
+    fn run_ffi(
+        &self,
+        case_id: &str,
+        variant: &str,
+        calls: u64,
+        _reps: u64,
+        _samples: u32,
+    ) -> Option<FfiSample> {
+        // Real reference checksum; per-call pretends to pay 20 ns per crossing.
+        let checksum = app_core::ffi_bench::reference_checksum(case_id, calls)?;
+        let ns = match variant {
+            "swift_inline" => 1.0,
+            "rust_per_call" => 21.0,
+            _ => 1.0 + 20.0 / calls as f64,
+        };
+        Some(FfiSample {
+            ns_per_call: ns,
+            checksum,
+        })
+    }
+}
+
+#[test]
+fn ffi_section_runs_separately_and_reports_crossing_cost() {
+    let app = App::new();
+    app.set_external_runner(Arc::new(FakeSwift));
+    app.dispatch(Action::RunFfiBench);
+    assert!(app.state().benchmark.ffi.running);
+    // Compute tests cannot start while the FFI section runs.
+    app.dispatch(Action::RunBenchmark { id: "fib".into() });
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while app.state().benchmark.ffi.running {
+        assert!(Instant::now() < deadline, "ffi bench timed out");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let b = app.state().benchmark;
+    assert!(b.rows.iter().all(|r| r.status == BenchStatus::Idle));
+    let ffi = b.ffi;
+    assert_eq!(ffi.rows.len(), 9);
+    assert!(ffi.rows.iter().all(|r| r.checksum_match == Some(true)));
+    assert_eq!(ffi.crossing_ns, Some(20.0));
+    assert!(ffi.summary.unwrap().contains("Break-even"));
+    assert_eq!(ffi.progress, 1.0);
+    let one = &ffi.rows[0];
+    assert_eq!(one.calls, 1);
+    assert!(one.rust_batched.is_some());
+    assert!(ffi
+        .rows
+        .iter()
+        .filter(|r| r.group == "marshal")
+        .all(|r| r.rust_batched.is_none()));
 }
 
 #[test]

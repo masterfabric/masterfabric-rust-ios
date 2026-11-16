@@ -8,6 +8,7 @@
 
 pub mod action;
 pub mod app;
+pub mod ffi_bench;
 pub mod heavy;
 pub mod media;
 pub mod navigation;
@@ -19,6 +20,7 @@ pub use action::Action;
 pub use app::{
     dirty, App, AppObserver, ExternalBenchRunner, Measurement, PerfMetric, ViewState, ViewUpdate,
 };
+pub use ffi_bench::{FfiRow, FfiSample, FfiSectionView};
 pub use navigation::{NavEntry, Navigator, Route};
 pub use screens::benchmark::{BenchRow, BenchStatus, BenchmarkViewState};
 pub use screens::detail::DetailViewModel;

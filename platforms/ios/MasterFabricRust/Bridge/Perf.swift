@@ -23,10 +23,10 @@ enum Perf {
     static var launchToFirstFrameMs: Double?
 
     /// Write JSON to Documents/perf.json (automation / before-after comparison).
-    static func export(_ dict: [String: Any]) {
+    static func export(_ dict: [String: Any], file: String = "perf.json") {
         guard let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
               let data = try? JSONSerialization.data(withJSONObject: dict, options: [.prettyPrinted, .sortedKeys])
         else { return }
-        try? data.write(to: dir.appendingPathComponent("perf.json"))
+        try? data.write(to: dir.appendingPathComponent(file))
     }
 }

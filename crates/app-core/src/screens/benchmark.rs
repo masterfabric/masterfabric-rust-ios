@@ -2,6 +2,7 @@
 //! categories, order, and how results are interpreted all live in Rust.
 
 use crate::app::Measurement;
+use crate::ffi_bench::{FfiBenchState, FfiSectionView};
 use crate::workloads;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -563,6 +564,8 @@ pub struct BenchmarkViewState {
     pub core_info: String,
     pub rust_threads: u32,
     pub swift_runner_attached: bool,
+    /// Test #37, its own section (not one of the 8 compute categories).
+    pub ffi: FfiSectionView,
 }
 
 #[derive(Clone, Debug)]
@@ -573,6 +576,7 @@ pub struct BenchmarkState {
     pub steps_done: u32,
     pub current_label: Option<String>,
     pub last_total_ms: Option<f64>,
+    pub ffi: FfiBenchState,
 }
 
 impl Default for BenchmarkState {
@@ -584,18 +588,24 @@ impl Default for BenchmarkState {
             steps_done: 0,
             current_label: None,
             last_total_ms: None,
+            ffi: FfiBenchState::default(),
         }
     }
 }
 
 impl BenchmarkState {
+    /// True while either the compute tests or the FFI section are running.
+    pub fn busy(&self) -> bool {
+        self.running || self.ffi.running
+    }
+
     pub fn row_mut(&mut self, id: &str) -> Option<&mut BenchRow> {
         self.rows.iter_mut().find(|r| r.id == id)
     }
 
     /// Prepare a run. `None` if already running or no valid ids.
     pub fn begin(&mut self, ids: Vec<String>) -> Option<Vec<String>> {
-        if self.running {
+        if self.busy() {
             return None;
         }
         let ids: Vec<String> = ids
@@ -624,23 +634,25 @@ impl BenchmarkState {
     }
 
     pub fn reset(&mut self) {
-        if !self.running {
+        if !self.busy() {
             *self = Self::default();
         }
     }
 
     /// Geometric mean of the completed single-thread ratios.
     pub fn summary(&self) -> Option<String> {
+        let (geo, n) = self.geomean()?;
+        Some(format!("Geometric mean ({n} tests): {}", verdict(geo)))
+    }
+
+    /// Geometric mean of the completed single-thread Swift/Rust ratios, and their count.
+    pub fn geomean(&self) -> Option<(f64, usize)> {
         let ratios: Vec<f64> = self.rows.iter().filter_map(|r| r.ratio).collect();
         if ratios.is_empty() {
             return None;
         }
         let geo = (ratios.iter().map(|r| r.ln()).sum::<f64>() / ratios.len() as f64).exp();
-        Some(format!(
-            "Geometric mean ({} tests): {}",
-            ratios.len(),
-            verdict(geo)
-        ))
+        Some((geo, ratios.len()))
     }
 
     pub fn view(&self, swift_runner_attached: bool) -> BenchmarkViewState {
@@ -663,6 +675,7 @@ impl BenchmarkState {
             core_info: crate::build_info(),
             rust_threads: rayon::current_num_threads() as u32,
             swift_runner_attached,
+            ffi: self.ffi.view(self.geomean().map(|g| g.0)),
         }
     }
 }
