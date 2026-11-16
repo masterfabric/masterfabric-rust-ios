@@ -8,15 +8,9 @@ struct HomeScreen: View {
         let home = bridge.home
         List {
             Section {
-                VStack(spacing: 12) {
-                    Wordmark(style: .header)
-                    Text(home.title)
-                        .font(.title2.weight(.bold))
-                        .frame(maxWidth: .infinity)
-                        .accessibilityIdentifier("home-title")
-                    ArchitectureBanner(revision: bridge.revision)
-                }
-                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 12, trailing: 16))
+                SwiftRustHero()
+                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 12, trailing: 16))
+                RevisionRow(revision: bridge.revision)
             }
 
             Section {
@@ -56,9 +50,13 @@ struct HomeScreen: View {
                      + (home.favoriteCount > 0 ? " · ★ \(home.favoriteCount)" : ""))
             }
         }
+        // Title kept for the back-button menu / accessibility; the visible header is the wordmark.
         .navigationTitle(home.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ToolbarItem(placement: .principal) {
+                Color.clear.frame(width: 1, height: 1).accessibilityHidden(true)
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     bridge.dispatch(.openInfo)
@@ -103,27 +101,19 @@ private struct NavRow: View {
     }
 }
 
-struct ArchitectureBanner: View {
+/// Live proof that the screen is driven by Rust state.
+struct RevisionRow: View {
     let revision: UInt64
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "gearshape.2.fill")
-                .font(.title2)
-                .foregroundStyle(.orange)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Shared Rust core · native UI").font(.subheadline.weight(.semibold))
-                Text("State, navigation, data and business rules live in the Rust core. SwiftUI only renders.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("Rust state revision: #\(revision)")
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(.tertiary)
-            }
-            Spacer(minLength: 0)
+        HStack(spacing: 10) {
+            Image(systemName: "gearshape.2.fill").foregroundStyle(.orange)
+            Text("Shared core · native UI").font(.footnote.weight(.semibold))
+            Spacer()
+            Text("state rev #\(revision)")
+                .font(.caption2.monospaced())
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("revision")
         }
-        .padding(12)
-        .background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 

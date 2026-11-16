@@ -6,7 +6,7 @@ files = sys.argv[1:]
 runs = [json.load(open(f)) for f in files]
 med = lambda xs: statistics.median(xs) if xs else float("nan")
 print(f"{len(runs)} runs (median)")
-for key in ["launch_to_first_frame_ms", "core_init_us", "dispatch_apply_avg_us", "dispatch_apply_p95_us", "full_snapshot_us", "total_ms"]:
+for key in ["launch_to_first_frame_ms", "core_init_us", "dispatch_apply_avg_us", "dispatch_apply_p95_us", "full_snapshot_us", "dispatch_render_avg_ms", "dispatch_render_p95_ms", "total_ms"]:
     vals = [r[key] for r in runs if key in r]
     if vals:
         print(f"{key:28s} {med(vals):10.2f}")

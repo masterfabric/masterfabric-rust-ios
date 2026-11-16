@@ -783,7 +783,11 @@ mod tests {
     fn raytrace_has_content() {
         let img = raytrace(32, 32);
         assert_eq!(img.len(), 32 * 32 * 4);
-        assert!(img.as_chunks::<4>().0.iter().any(|p| p[0] > 150 && p[1] < 120)); // red sphere visible
+        assert!(img
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|p| p[0] > 150 && p[1] < 120)); // red sphere visible
     }
 
     #[test]

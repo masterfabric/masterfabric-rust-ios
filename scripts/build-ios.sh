@@ -16,7 +16,7 @@ HEADERS="$ROOT/build/headers"
 IOS="$ROOT/platforms/ios"
 XCF="$IOS/Frameworks/AppCore.xcframework"
 
-echo "==> Rust: aarch64-apple-ios (cihaz)"
+echo "==> Rust: aarch64-apple-ios (device)"
 cargo build -p "$CRATE" --release --target aarch64-apple-ios
 echo "==> Rust: aarch64-apple-ios-sim (Apple Silicon simulator)"
 cargo build -p "$CRATE" --release --target aarch64-apple-ios-sim
@@ -41,7 +41,7 @@ xcodebuild -create-xcframework \
   -library "target/aarch64-apple-ios-sim/release/$LIB.a" -headers "$HEADERS" \
   -output "$XCF" >/dev/null
 
-echo "==> Xcode projesi (XcodeGen)"
+echo "==> Xcode project (XcodeGen)"
 (cd "$IOS" && xcodegen generate --quiet)
 
-echo "Tamam: $XCF"
+echo "Done: $XCF"

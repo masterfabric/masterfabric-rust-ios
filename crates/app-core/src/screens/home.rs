@@ -47,7 +47,7 @@ impl HomeViewModel {
             .is_empty()
             .then(|| format!("No results for \"{}\"", query.trim()));
         Self {
-            title: "MasterFabric Rust".to_string(),
+            title: "MasterFabric".to_string(),
             query: query.to_string(),
             total_count: store.all().len() as u32,
             favorite_count: store.all().iter().filter(|i| i.favorite).count() as u32,
