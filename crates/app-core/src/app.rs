@@ -10,6 +10,7 @@ use std::thread;
 use std::time::Instant;
 
 use crate::action::Action;
+use crate::ffi_bench::{self, FfiSample};
 use crate::navigation::{NavEntry, Navigator, Route};
 use crate::screens::benchmark::{BenchStatus, BenchmarkState, BenchmarkViewState};
 use crate::screens::detail::DetailViewModel;
@@ -59,6 +60,25 @@ pub trait AppObserver: Send + Sync {
 pub trait ExternalBenchRunner: Send + Sync {
     fn language(&self) -> String;
     fn run(&self, bench_id: &str, param: u64, iterations: u32) -> Option<Measurement>;
+    /// Test #37: run one FFI-boundary variant on the platform side, which is where the
+    /// platform→Rust crossing can be observed. `calls` operations per repetition,
+    /// `reps` repetitions per timed sample, median of `samples` samples.
+    fn run_ffi(
+        &self,
+        _case_id: &str,
+        _variant: &str,
+        _calls: u64,
+        _reps: u64,
+        _samples: u32,
+    ) -> Option<FfiSample> {
+        None
+    }
+}
+
+/// Background job started by `dispatch`.
+enum Job {
+    Bench(Vec<String>),
+    Ffi,
 }
 
 /// Full snapshot (used once at startup and in tests).
@@ -250,11 +270,14 @@ impl App {
                 detail: format!("reduce {reduce_us:.1} µs + partial update + callback"),
             });
         }
-        if let Some(ids) = job {
+        if let Some(job) = job {
             let app = Arc::clone(self);
             thread::Builder::new()
                 .name("mf-benchmark".into())
-                .spawn(move || app.run_benchmarks(ids))
+                .spawn(move || match job {
+                    Job::Bench(ids) => app.run_benchmarks(ids),
+                    Job::Ffi => app.run_ffi_bench(),
+                })
                 .expect("failed to start benchmark thread");
         }
     }
@@ -342,6 +365,65 @@ impl App {
     }
 }
 
+impl App {
+    /// Background thread for test #37. Rust decides the cases, order and parameters and
+    /// interprets the results; the platform runner only times the loops it is told to.
+    fn run_ffi_bench(&self) {
+        let started = Instant::now();
+        let runner = self.external_runner();
+        let rows = self.lock().bench.ffi.rows.clone();
+        for row in rows {
+            let (id, case_id, label, calls, reps) = (
+                row.id.clone(),
+                row.case_id.clone(),
+                row.label.clone(),
+                row.calls,
+                row.reps,
+            );
+            let variants = row.variants();
+            for variant in variants {
+                self.mutate(dirty::BENCH, |s| {
+                    s.bench.ffi.current_label =
+                        Some(format!("{label} · {}", variant_label(variant)));
+                    if let Some(r) = s.bench.ffi.row_mut(&id) {
+                        r.running = true;
+                    }
+                });
+                let sample = runner
+                    .as_ref()
+                    .and_then(|r| r.run_ffi(&case_id, variant, calls, reps, ffi_bench::SAMPLES));
+                self.mutate(dirty::BENCH, |s| {
+                    s.bench.ffi.steps_done += 1;
+                    if let Some(r) = s.bench.ffi.row_mut(&id) {
+                        r.set(variant, sample.clone());
+                        r.finalize();
+                    }
+                });
+            }
+            self.mutate(dirty::BENCH, |s| {
+                if let Some(r) = s.bench.ffi.row_mut(&id) {
+                    r.running = false;
+                }
+            });
+        }
+        let total = started.elapsed().as_secs_f64() * 1000.0;
+        self.mutate(dirty::BENCH, |s| {
+            s.bench.ffi.running = false;
+            s.bench.ffi.current_label = None;
+            s.bench.ffi.last_total_ms = Some(total);
+        });
+    }
+}
+
+fn variant_label(v: &str) -> &'static str {
+    match v {
+        ffi_bench::SWIFT_INLINE => "Swift inline",
+        ffi_bench::RUST_PER_CALL => "Rust per call",
+        ffi_bench::RUST_BATCHED => "Rust batched",
+        _ => "?",
+    }
+}
+
 fn to_measurement(iterations: u32) -> impl Fn((f64, f64, u64)) -> Measurement {
     move |(avg, min, checksum)| Measurement {
         avg_ms: avg,
@@ -352,7 +434,7 @@ fn to_measurement(iterations: u32) -> impl Fn((f64, f64, u64)) -> Measurement {
 }
 
 /// Pure state transition. Returns the dirty mask and an optional benchmark job.
-fn reduce(s: &mut AppState, action: Action) -> (u8, Option<Vec<String>>) {
+fn reduce(s: &mut AppState, action: Action) -> (u8, Option<Job>) {
     use dirty::*;
     match action {
         Action::OpenDetail { item_id } => {
@@ -395,13 +477,13 @@ fn reduce(s: &mut AppState, action: Action) -> (u8, Option<Vec<String>>) {
             }
         }
         Action::RunBenchmark { id } => match s.bench.begin(vec![id]) {
-            Some(job) => (BENCH | INFO, Some(job)),
+            Some(ids) => (BENCH | INFO, Some(Job::Bench(ids))),
             None => (0, None),
         },
         Action::RunAllBenchmarks => {
             let ids = s.bench.rows.iter().map(|r| r.id.clone()).collect();
             match s.bench.begin(ids) {
-                Some(job) => (BENCH | INFO, Some(job)),
+                Some(ids) => (BENCH | INFO, Some(Job::Bench(ids))),
                 None => (0, None),
             }
         }
@@ -414,7 +496,16 @@ fn reduce(s: &mut AppState, action: Action) -> (u8, Option<Vec<String>>) {
                 .map(|r| r.id.clone())
                 .collect();
             match s.bench.begin(ids) {
-                Some(job) => (BENCH | INFO, Some(job)),
+                Some(ids) => (BENCH | INFO, Some(Job::Bench(ids))),
+                None => (0, None),
+            }
+        }
+        Action::RunFfiBench => {
+            if s.bench.busy() {
+                return (0, None);
+            }
+            match s.bench.ffi.begin() {
+                Some(_) => (BENCH, Some(Job::Ffi)),
                 None => (0, None),
             }
         }
@@ -441,7 +532,7 @@ fn reduce(s: &mut AppState, action: Action) -> (u8, Option<Vec<String>>) {
     }
 }
 
-fn push(s: &mut AppState, route: Route) -> (u8, Option<Vec<String>>) {
+fn push(s: &mut AppState, route: Route) -> (u8, Option<Job>) {
     if s.nav.current() == &route {
         return (0, None);
     }

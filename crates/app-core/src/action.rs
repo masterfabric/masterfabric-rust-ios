@@ -23,6 +23,8 @@ pub enum Action {
     RunAllBenchmarks,
     /// Run every benchmark of one category (e.g. "Image").
     RunCategory { category: String },
+    /// Run test #37: the FFI boundary / chatty-calls section.
+    RunFfiBench,
     /// Clear benchmark results.
     ResetBenchmarks,
     /// Record a platform-measured performance metric (launch time, latency, ...).

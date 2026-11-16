@@ -5,7 +5,8 @@
 //!
 //! FFI cost notes: state changes are sent as *partial* `ViewUpdate`s (only changed
 //! screens), large pixel buffers cross once as `Vec<u8>` (bytes → `Data`), and
-//! there are no per-item calls.
+//! there are no per-item calls. The one deliberate exception is test #37 (`ffi_*`
+//! functions below), which exists to measure what a chatty per-call API would cost.
 
 use std::sync::Arc;
 
@@ -120,6 +121,58 @@ pub struct BenchmarkState {
     pub core_info: String,
     pub rust_threads: u32,
     pub swift_runner_attached: bool,
+    pub ffi: FfiSection,
+}
+
+// ------------------------------------------------------------------ test #37 types
+
+#[derive(uniffi::Record, Clone, Debug)]
+pub struct FfiSample {
+    pub ns_per_call: f64,
+    pub checksum: u64,
+}
+
+#[derive(uniffi::Record, Clone, Debug)]
+pub struct FfiRow {
+    pub id: String,
+    pub group: String,
+    pub case_id: String,
+    pub label: String,
+    pub detail: String,
+    pub calls: u64,
+    pub reps: u64,
+    pub swift_inline: Option<FfiSample>,
+    pub rust_per_call: Option<FfiSample>,
+    pub rust_batched: Option<FfiSample>,
+    pub has_batched: bool,
+    pub expected_checksum: u64,
+    pub overhead_ns: Option<f64>,
+    pub per_call_slowdown: Option<f64>,
+    pub batched_ratio: Option<f64>,
+    pub verdict: Option<String>,
+    pub checksum_match: Option<bool>,
+    pub running: bool,
+}
+
+#[derive(uniffi::Record, Clone, Debug)]
+pub struct FfiSection {
+    pub title: String,
+    pub intro: String,
+    pub rows: Vec<FfiRow>,
+    pub running: bool,
+    pub progress: f64,
+    pub current_label: Option<String>,
+    pub crossing_ns: Option<f64>,
+    pub summary: Option<String>,
+    pub last_total_ms: Option<f64>,
+}
+
+/// Small record passed by value in the `record` marshaling case.
+#[derive(uniffi::Record, Clone, Copy, Debug)]
+pub struct FfiPoint {
+    pub x: i32,
+    pub y: i32,
+    pub z: i32,
 }
 
 #[derive(uniffi::Record, Clone, Debug)]
@@ -230,6 +283,7 @@ pub enum Action {
     RunCategory {
         category: String,
     },
+    RunFfiBench,
     ResetBenchmarks,
     RecordPerf {
         id: String,
@@ -253,6 +307,15 @@ pub trait StateListener: Send + Sync {
 pub trait SwiftBenchRunner: Send + Sync {
     fn language(&self) -> String;
     fn run(&self, bench_id: String, param: u64, iterations: u32) -> Option<BenchMeasurement>;
+    /// Test #37: time one FFI-boundary variant on the Swift side (median ns per call).
+    fn run_ffi(
+        &self,
+        case_id: String,
+        variant: String,
+        calls: u64,
+        reps: u64,
+        samples: u32,
+    ) -> Option<FfiSample>;
 }
 
 struct ListenerAdapter(Arc<dyn StateListener>);
@@ -285,6 +348,67 @@ impl core::ExternalBenchRunner for RunnerAdapter {
                 checksum: m.checksum,
             })
     }
+    fn run_ffi(
+        &self,
+        case_id: &str,
+        variant: &str,
+        calls: u64,
+        reps: u64,
+        samples: u32,
+    ) -> Option<core::FfiSample> {
+        self.0
+            .run_ffi(case_id.into(), variant.into(), calls, reps, samples)
+            .map(|s| core::FfiSample {
+                ns_per_call: s.ns_per_call,
+                checksum: s.checksum,
+            })
+    }
+}
+
+// ------------------------------------------------------------------ test #37: chatty-call API
+//
+// Deliberately tiny functions. Swift calls them once per operation to measure the cost of
+// a UniFFI crossing (argument lowering, `rust_call` status handling, return lifting).
+
+/// One `mix` step. Per-call variant of the u64 sweep.
+#[uniffi::export]
+pub fn ffi_mix(acc: u64, i: u64) -> u64 {
+    core::ffi_bench::mix(acc, i)
+}
+
+/// `n` `mix` steps in one call. Batched variant.
+#[uniffi::export]
+pub fn ffi_mix_batch(seed: u64, n: u64) -> u64 {
+    core::ffi_bench::mix_batch(seed, n)
+}
+
+/// String marshaling case.
+#[uniffi::export]
+pub fn ffi_str_mix(s: String, seed: u64) -> u64 {
+    core::ffi_bench::str_mix(&s, seed)
+}
+
+/// Record marshaling case.
+#[uniffi::export]
+pub fn ffi_point_mix(p: FfiPoint) -> u64 {
+    core::ffi_bench::point_mix(p.x, p.y, p.z)
+}
+
+/// `Vec<u32>` marshaling case.
+#[uniffi::export]
+pub fn ffi_vec_mix(v: Vec<u32>, seed: u64) -> u64 {
+    core::ffi_bench::vec_mix(&v, seed)
+}
+
+/// Inputs of the marshaling cases, so Swift and Rust use identical data.
+#[uniffi::export]
+pub fn ffi_sample_strings() -> Vec<String> {
+    core::ffi_bench::sample_strings()
+}
+
+#[uniffi::export]
+pub fn ffi_sample_vec() -> Vec<u32> {
+    core::ffi_bench::sample_vec()
 }
 
 // ------------------------------------------------------------------ object
@@ -485,6 +609,57 @@ impl From<core::BenchmarkViewState> for BenchmarkState {
             core_info: b.core_info,
             rust_threads: b.rust_threads,
             swift_runner_attached: b.swift_runner_attached,
+            ffi: b.ffi.into(),
+        }
+    }
+}
+
+impl From<core::FfiSample> for FfiSample {
+    fn from(s: core::FfiSample) -> Self {
+        Self {
+            ns_per_call: s.ns_per_call,
+            checksum: s.checksum,
+        }
+    }
+}
+
+impl From<core::FfiRow> for FfiRow {
+    fn from(r: core::FfiRow) -> Self {
+        Self {
+            id: r.id,
+            group: r.group,
+            case_id: r.case_id,
+            label: r.label,
+            detail: r.detail,
+            calls: r.calls,
+            reps: r.reps,
+            swift_inline: r.swift_inline.map(Into::into),
+            rust_per_call: r.rust_per_call.map(Into::into),
+            rust_batched: r.rust_batched.map(Into::into),
+            has_batched: r.has_batched,
+            expected_checksum: r.expected_checksum,
+            overhead_ns: r.overhead_ns,
+            per_call_slowdown: r.per_call_slowdown,
+            batched_ratio: r.batched_ratio,
+            verdict: r.verdict,
+            checksum_match: r.checksum_match,
+            running: r.running,
+        }
+    }
+}
+
+impl From<core::FfiSectionView> for FfiSection {
+    fn from(v: core::FfiSectionView) -> Self {
+        Self {
+            title: v.title,
+            intro: v.intro,
+            rows: v.rows.into_iter().map(Into::into).collect(),
+            running: v.running,
+            progress: v.progress,
+            current_label: v.current_label,
+            crossing_ns: v.crossing_ns,
+            summary: v.summary,
+            last_total_ms: v.last_total_ms,
         }
     }
 }
@@ -577,6 +752,7 @@ impl From<Action> for core::Action {
             Action::RunBenchmark { id } => core::Action::RunBenchmark { id },
             Action::RunAllBenchmarks => core::Action::RunAllBenchmarks,
             Action::RunCategory { category } => core::Action::RunCategory { category },
+            Action::RunFfiBench => core::Action::RunFfiBench,
             Action::ResetBenchmarks => core::Action::ResetBenchmarks,
             Action::RecordPerf {
                 id,
@@ -609,5 +785,21 @@ mod tests {
         assert!(s.benchmark.rows.len() >= 30);
         assert_eq!(s.benchmark.rows[0].category, "Image");
         assert!(!s.info.categories.is_empty());
+        assert_eq!(s.benchmark.ffi.rows.len(), 9);
+    }
+
+    #[test]
+    fn ffi_functions_match_reference() {
+        // Per-call chain == batched == core reference (1 rep of 1,000 calls is reps_for(1000)=1000;
+        // check the chain property directly instead).
+        let mut a = 0x5EED;
+        for i in 0..1000 {
+            a = ffi_mix(a, i);
+        }
+        assert_eq!(a, ffi_mix_batch(0x5EED, 1000));
+        assert_eq!(ffi_sample_strings().len(), 16);
+        assert_eq!(ffi_sample_vec().len(), 16);
+        let p = FfiPoint { x: 1, y: 3, z: -1 };
+        assert_eq!(ffi_point_mix(p), core::ffi_bench::point_mix(1, 3, -1));
     }
 }
