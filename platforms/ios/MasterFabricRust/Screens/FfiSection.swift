@@ -48,24 +48,27 @@ struct FfiSectionView: View {
 
             if let c = ffi.crossingNs {
                 Card {
-                    HStack(alignment: .center, spacing: 12) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("UniFFI crossing").font(.caption).foregroundStyle(.secondary)
-                            Text(String(format: "≈ %.1f ns / call", c))
-                                .font(.title2.weight(.bold).monospacedDigit())
-                                .foregroundStyle(.teal)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Extra cost per Swift→Rust call").font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            if let t = ffi.lastTotalMs {
+                                Text(String(format: "%.1f s total", t / 1000))
+                                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                            }
                         }
-                        Spacer()
-                        if let t = ffi.lastTotalMs {
-                            Text(String(format: "%.1f s total", t / 1000))
-                                .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                        HStack(spacing: 8) {
+                            cost("u64", c)
+                            ForEach(ffi.rows.filter { $0.group == "marshal" }, id: \.id) { r in
+                                if let o = r.overheadNs { cost(shortCase(r.caseId), o) }
+                            }
                         }
                     }
                 }
             }
 
-            Card { table(ffi.rows) }
-            Card { chart(ffi.rows.filter { $0.group == "sweep" }) }
+            Card { table(ffi.rows) }.id("ffi-table")
+            Card { chart(ffi.rows.filter { $0.group == "sweep" }) }.id("ffi-chart")
 
             if let s = ffi.summary {
                 Card {
@@ -76,12 +79,32 @@ struct FfiSectionView: View {
                     }
                 }
             }
-            Text("ns per operation, median of 5 samples (1 warm-up). Each sample ≈ 1,000,000 operations: reps × calls. Swift inline = no FFI; Rust per call = one UniFFI call per op; Rust batched = one UniFFI call doing all ops in Rust. Overhead = per call − inline. Checksums of all variants must equal Rust's reference."
+            Text("ns per operation, median of 5 samples (1 warm-up). Each sample ≈ 1,000,000 operations: reps × calls. Swift inline = no FFI; Rust per call = one UniFFI call per op; Rust batched = one UniFFI call doing all ops in Rust. Overhead = per call − inline. At 1–10 calls the inline loop is throughput-bound (independent reps overlap on the CPU), so its ns/op is lower than in long dependent chains. Checksums of all variants must equal Rust's reference."
                  + (DeviceInfo.isSimulator ? " Simulator: Mac CPU, not a real iPhone." : ""))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
         .id("ffi")
+    }
+
+    private func cost(_ title: String, _ ns: Double) -> some View {
+        VStack(spacing: 2) {
+            Text("+" + fmt(ns)).font(.headline.weight(.bold).monospacedDigit())
+                .foregroundStyle(ns < 5 ? Color.teal : ns < 100 ? Color.orange : Color.red)
+            Text(title + " · ns").font(.caption2).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 6)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func shortCase(_ id: String) -> String {
+        switch id {
+        case "string": return "String"
+        case "record": return "record"
+        case "vec16": return "Vec×16"
+        default: return id
+        }
     }
 
     // MARK: Table

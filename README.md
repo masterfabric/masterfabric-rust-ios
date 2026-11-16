@@ -33,8 +33,8 @@ flowchart LR
 
 | Path | What |
 |---|---|
-| `crates/app-core` | Rust core: `app.rs` (dispatch, dirty mask, ViewUpdate), `navigation.rs`, `screens/` (home, detail, benchmark, info view models), `store/`, `workloads.rs` + `media.rs` + `heavy.rs` (36 benchmark kernels), `examples/calibrate.rs` |
-| `crates/app-ffi` | UniFFI records/enums/objects (`AppCore`, `StateListener`, `SwiftBenchRunner`) |
+| `crates/app-core` | Rust core: `app.rs` (dispatch, dirty mask, ViewUpdate), `navigation.rs`, `screens/` (home, detail, benchmark, info view models), `store/`, `workloads.rs` + `media.rs` + `heavy.rs` (36 benchmark kernels), `ffi_bench.rs` (test #37: FFI boundary cases + analysis), `examples/calibrate.rs` |
+| `crates/app-ffi` | UniFFI records/enums/objects (`AppCore`, `StateListener`, `SwiftBenchRunner`) + the deliberately tiny `ffi_*` functions of test #37 |
 | `crates/uniffi-bindgen` | bindgen binary (library mode) |
 | `platforms/ios/project.yml` | XcodeGen spec (the `.xcodeproj`, `Generated/` and the xcframework are build output, gitignored) |
 | `platforms/ios/MasterFabricRust` | SwiftUI app: `Bridge/` (CoreBridge, Perf, DeviceInfo), `Screens/`, `Benchmarks/` (Swift ports, `SwiftHeavy.swift`), `Brand/` (wordmark, Swift + Rust hero), `Assets.xcassets` |
@@ -50,6 +50,7 @@ flowchart LR
   rendered from the Rust RGBA buffer next to the Swift one, results table grouped by category,
   Swift Charts (ratio + duration per category), per-category cards with a Run button, and an app
   performance card (launch, dispatch→apply, dispatch→frame). Runs happen on a background thread.
+  A separate **#37 FFI boundary** section measures what chatty Swift→Rust calls cost (see below).
 - **Info**: what you can build with Rust, architecture diagram, ratios measured by this app only,
   app performance. All content is served from Rust.
 
@@ -75,6 +76,66 @@ reuse the same kernels (identical checksums) and are shown separately, never mix
 Swift has no parallel variants. Floating-point sums are quantized per item before summing, so
 checksums are order-independent (sequential = parallel = Swift).
 
+### What the 36 timings include (and exclude)
+- **Rust** is timed inside Rust: `workloads::measure_with` wraps each `run_once` in `Instant::now()`
+  (`crates/app-core/src/workloads.rs`), on Rust's own background thread (`App::run_benchmarks`).
+- **Swift** is timed inside Swift: `SwiftWorkloads.measure` wraps each `runOnce` in
+  `DispatchTime.now()` (`Benchmarks/SwiftWorkloads.swift`). Rust reaches it through *one*
+  `SwiftBenchRunner.run` callback per test (`app-ffi` `RunnerAdapter`).
+- So the UniFFI crossing (one per test, either direction) is **outside both timers**: the 36 ratios
+  compare compute only, which is fair for coarse-grained calls. Inputs are generated inside each
+  kernel, so no data is marshaled per test either. The `dispatch → state applied` metric (App
+  performance card) is the only number that includes FFI + UI-update cost.
+- What the 36 tests do *not* tell you is what happens when Swift calls Rust many times with tiny
+  amounts of work. That is test #37.
+
+### #37 · FFI boundary: chatty calls (own section, not one of the 8 categories)
+The same tiny op (`mix`: multiply, xor, rotate ≈ 1.4 ns) is executed `N` times
+(N = 1, 10, 100, 1k, 10k, 100k) in three ways:
+
+| Variant | What crosses the boundary |
+|---|---|
+| Swift inline | nothing (baseline, pure Swift loop) |
+| Rust per call | one UniFFI call `ffiMix(acc:i:)` per op |
+| Rust batched | one UniFFI call `ffiMixBatch(seed:n:)` that loops N times in Rust |
+
+Plus three **marshaling** cases at 10,000 calls that pass a `String` (~20 bytes), a 3×`i32`
+record and a `Vec<u32>` of 16 on every call. Every sample runs ≈ 1,000,000 ops
+(`reps = 1,000,000 / N`, each rep seeded `0x5EED ^ rep` so nothing can be hoisted), 1 warm-up +
+5 timed samples, median ns/op. Timing happens on the Swift side (only the caller can see the
+crossing), but cases, parameters, order, the per-row verdicts and the crossover analysis live in
+Rust (`crates/app-core/src/ffi_bench.rs`, `Action::RunFfiBench`, partial `ViewUpdate`). All
+variants must produce Rust's `reference_checksum`.
+
+Results (iPhone 18 Pro **simulator → Mac CPU**, Release, median of 3 app runs):
+
+| Case | Calls | Swift inline | Rust per call | Rust batched | Extra per call |
+|---|---:|---:|---:|---:|---:|
+| u64 | 1 | 0.43 | 1.90 | 1.90 | 1.48 |
+| u64 | 10 | 0.38 | 1.99 | 0.45 | 1.62 |
+| u64 | 100 | 1.11 | 1.81 | 0.85 | 0.70 |
+| u64 | 1,000 | 1.41 | 1.83 | 1.15 | 0.42 |
+| u64 | 10,000 | 1.42 | 1.84 | 1.20 | 0.42 |
+| u64 | 100,000 | 1.42 | 1.84 | 1.20 | 0.42 |
+| String arg | 10,000 | 19.2 | 50.2 | — | 31 |
+| record arg | 10,000 | 1.45 | 54.5 | — | 53 |
+| Vec\<u32\>×16 arg | 10,000 | 7.76 | 177 | — | 170 |
+
+ns per operation. Takeaways:
+- **Scalar calls are cheap**: a `u64 → u64` UniFFI call costs ≈ 1.8–1.9 ns end to end. In a
+  dependent chain it adds ≈ 0.4 ns over inline Swift; for independent tiny work (N ≤ 10) it is
+  ≈ 4–5× slower than inline Swift.
+- **Marshaling is the real cost**: anything UniFFI serializes into a `RustBuffer` (String, record,
+  Vec) adds ≈ 30–170 ns *per call*, i.e. 25–120× the work in these cases.
+- **Batching wins**: one call doing N ops pays the crossing once and runs ≈ 1.2× faster than
+  inline Swift from N ≈ 100.
+- **Break-even**: with Rust ≈ 1.7× faster at compute (geomean of the 36 tests), a call must carry
+  ≥ ~1 ns of Swift-time work with scalar args, and ≥ ~0.4 µs with a Vec/record arg, before moving
+  it to Rust pays off. That is why this app sends one `Action` per user event and one partial
+  `ViewUpdate` back instead of per-item calls.
+
+![#37 section](docs/ffi-bench/01-section.png)
+
 Verification outside the app:
 
 ```sh
@@ -90,7 +151,8 @@ cargo run --release -p app-core --example calibrate    # per-test ms, parallel m
 - `.cargo/config.toml`: `target-cpu=apple-m1` for the simulator, `apple-a14` for devices.
   The Swift side is not CPU-tuned the same way, so this slightly favours Rust.
 - FFI: partial `ViewUpdate`s instead of a full state snapshot per change; large buffers
-  (ray-trace image) cross once as `Vec<u8>`.
+  (ray-trace image) cross once as `Vec<u8>`. Test #37 quantifies why: per-call marshaling costs
+  30–170 ns, so the app never makes per-item calls.
 - Hot loops: slice/zip iteration, `as_chunks`, no allocations inside loops.
 - Measured in-app and recorded into Rust via `Action::RecordPerf`: launch → first frame,
   Rust core init, dispatch → state applied (avg/p95), full snapshot cost, dispatch → next frame.
@@ -104,6 +166,7 @@ Prerequisites: Xcode, `rustup target add aarch64-apple-ios aarch64-apple-ios-sim
 # UI flow tests (scheme MasterFabricRust, Debug):
 # xcodebuild test -project platforms/ios/MasterFabricRust.xcodeproj -scheme MasterFabricRust -destination 'platform=iOS Simulator,name=iPhone 18 Pro'
 ./scripts/measure.sh after 3  # 3 launches with -probe/-autorun, medians of build/perf/after-*.json
+./scripts/measure-ffi.sh v1 3 # test #37 only: 3 launches with -ffiAutorun, median table of build/perf/ffi-v1-*.json
 cargo test --release && cargo clippy --workspace --all-targets --release
 ```
 
@@ -115,8 +178,9 @@ Launch arguments (pass after `run-sim.sh` or `simctl launch`):
 | `-detailId N` | item for `-startScreen detail` (default 1) |
 | `-query text` | initial search query |
 | `-autorun YES` | run all 36 benchmarks |
+| `-ffiAutorun YES` | run test #37 (FFI boundary); with `-autorun YES` it runs after the 36, so break-even uses the measured geomean |
 | `-probe YES` | measure dispatch→apply and dispatch→frame latency before autorun |
-| `-scrollTo categories\|media\|table\|charts\|perf\|cat-<Category>\|<bench id>` | benchmark screen: scroll there when a run finishes |
+| `-scrollTo categories\|media\|table\|charts\|perf\|ffi\|ffi-table\|ffi-chart\|cat-<Category>\|<bench id>` | benchmark screen: scroll there when a run finishes |
 | `-infoScrollTo projects\|measured\|perf` | info screen: scroll there on appear |
 
 Bundle id: `com.masterfabric.rustios`, display name "MasterFabric Rust".
