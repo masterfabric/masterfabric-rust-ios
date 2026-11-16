@@ -18,7 +18,7 @@ struct HomeScreen: View {
                     bridge.dispatch(.openBenchmark)
                 } label: {
                     NavRow(symbol: "speedometer", color: .orange, title: "Benchmark: Rust vs Swift",
-                           subtitle: "Media + general workloads · real measurements")
+                           subtitle: "36 tests in 8 categories · real measurements")
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("open-benchmark")

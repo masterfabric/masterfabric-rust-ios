@@ -1,0 +1,43 @@
+MasterFabric Rust iOS
+Copyright (c) 2026 MasterFabric
+https://github.com/masterfabric/masterfabric-rust-ios
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Affero General Public License, version 3, as published by
+the Free Software Foundation (see LICENSE). It is distributed WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE.
+
+Additional terms under section 7 of the AGPL-3.0
+-------------------------------------------------
+These terms only use the options that section 7 allows. They add no further
+restrictions; every permission granted by the AGPL-3.0 stays in full effect.
+
+1. Attribution (section 7(b)). Modified or redistributed versions must keep the
+   copyright notice above, this NOTICE file, and the license and attribution
+   notices in the source files and in the README. If you distribute a modified
+   app, mark it as modified and do not present it as the original.
+
+2. Trademarks (section 7(e)). The AGPL-3.0 does not grant any right to use the
+   MasterFabric name, the MASTERFABRIC wordmark or the MasterFabric app icon as
+   a trademark. A modified version that is published (for example in an app
+   store) must use its own name and icon. Describing the project's origin
+   ("based on MasterFabric Rust iOS") is allowed.
+
+Network use (section 13) is part of the AGPL-3.0 itself: if you let users
+interact with a modified version over a network, you must offer them its
+corresponding source.
+
+Third-party components
+----------------------
+- Rust logo (platforms/ios/MasterFabricRust/Assets.xcassets/RustLogo.imageset):
+  from rust-lang/rust-artwork, (c) the Rust project, licensed CC-BY 4.0. "Rust"
+  and the Rust logo are trademarks of the Rust Foundation.
+- "Swift" and the Swift logo (shown via the SF Symbol "swift") are trademarks of
+  Apple Inc. SF Symbols are subject to Apple's license terms.
+- Rust crates (see Cargo.lock) keep their own licenses.
+
+Contact
+-------
+Questions: https://github.com/masterfabric/masterfabric-rust-ios/issues
+Security reports (private): https://github.com/masterfabric/masterfabric-rust-ios/security/advisories/new

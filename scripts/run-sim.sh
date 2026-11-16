@@ -6,7 +6,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 IOS="$ROOT/platforms/ios"
 CONFIG="${CONFIG:-Release}"
-BUNDLE_ID=co.masterfabric.rustios
+BUNDLE_ID=com.masterfabric.rustios
 
 SIM_ID="$(xcrun simctl list devices booted | grep -Eo '\(([0-9A-F-]{36})\)' | head -1 | tr -d '()' || true)"
 if [ -z "$SIM_ID" ]; then

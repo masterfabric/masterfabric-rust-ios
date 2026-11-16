@@ -3,10 +3,10 @@ import SwiftUI
 
 /// Benchmark screen. Test list, categories, order, progress, ratios and verdicts live in Rust;
 /// measurements run on a background thread (Rust single-thread, Rust rayon, then the same
-/// algorithm in Swift). Media workloads are the featured category, at the top.
+/// algorithm in Swift). 36 tests in 8 categories; run all, one category, or one test.
 struct BenchmarkScreen: View {
     @Environment(CoreBridge.self) private var bridge
-    @State private var chartCategory = "Media"
+    @State private var chartCategory = "Image"
 
     var body: some View {
         let b = bridge.benchmark
@@ -16,10 +16,11 @@ struct BenchmarkScreen: View {
                 VStack(alignment: .leading, spacing: 14) {
                     EnvironmentCard(bench: b)
                     controls(b)
+                    CategoryRunGrid(bench: b, categories: categories).id("categories")
                     if let summary = b.summary {
                         SummaryCard(summary: summary, totalMs: b.lastTotalMs)
                     }
-                    SectionTitle(title: "Featured: Media", symbol: "sparkles.tv").id("media")
+                    SectionTitle(title: "Rendered output: Rust vs Swift", symbol: "sparkles.tv").id("media")
                     MediaPreviewCard()
                     SectionTitle(title: "Results table", symbol: "tablecells").id("table")
                     ResultsTable(rows: b.rows, categories: categories, threads: b.rustThreads)
@@ -29,8 +30,10 @@ struct BenchmarkScreen: View {
                     SectionTitle(title: "App performance", symbol: "gauge.with.dots.needle.67percent").id("perf")
                     AppPerfCard()
                     ForEach(categories, id: \.self) { cat in
-                        SectionTitle(title: cat == "Media" ? "Media workloads" : "General workloads",
-                                     symbol: cat == "Media" ? "film" : "cpu")
+                        CategoryHeader(category: cat, rows: b.rows.filter { $0.category == cat }, running: b.running) {
+                            bridge.dispatch(.runCategory(category: cat))
+                        }
+                        .id("cat-" + cat)
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 330), spacing: 12)], spacing: 12) {
                             ForEach(b.rows.filter { $0.category == cat }, id: \.id) { row in
                                 BenchCard(row: row, threads: b.rustThreads, disabled: b.running) {
@@ -40,7 +43,7 @@ struct BenchmarkScreen: View {
                             }
                         }
                     }
-                    Text("Each test: 1 warm-up run + the shown number of measured runs. Ratio = Swift avg / Rust single-thread avg. Rust ∥ (rayon) is shown separately and is not part of the ratio. Checksums confirm both languages (and the parallel variant) produce the same result.")
+                    Text("Each test: 1 warm-up run + the shown number of measured runs. Ratio = Swift avg / Rust single-thread avg. The Rust rayon variant is shown separately and is not part of the ratio. Checksums confirm both languages (and the parallel variant) produce the same result.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -110,7 +113,7 @@ func shortName(_ id: String, fallback: String = "") -> String {
     switch id {
     case "raytrace": return "Ray tracing"
     case "raster": return "Rasterization"
-    case "image": return "Image processing"
+    case "image": return "Image pipeline"
     case "video": return "Video processing"
     case "mesh": return "3D mesh"
     case "fib": return "Fibonacci"
@@ -124,7 +127,114 @@ func shortName(_ id: String, fallback: String = "") -> String {
     }
 }
 
-func categoryColor(_ c: String) -> Color { c == "Media" ? .pink : .orange }
+func categoryColor(_ c: String) -> Color {
+    switch c {
+    case "Image": return .pink
+    case "Video": return .purple
+    case "3D": return .indigo
+    case "Math": return .blue
+    case "Data": return .teal
+    case "Text": return .green
+    case "Crypto": return .orange
+    case "Algorithms": return .red
+    default: return .gray
+    }
+}
+
+func categorySymbol(_ c: String) -> String {
+    switch c {
+    case "Image": return "photo.fill"
+    case "Video": return "film.fill"
+    case "3D": return "cube.fill"
+    case "Math": return "function"
+    case "Data": return "cylinder.split.1x2.fill"
+    case "Text": return "textformat"
+    case "Crypto": return "lock.fill"
+    case "Algorithms": return "point.3.connected.trianglepath.dotted"
+    default: return "cpu"
+    }
+}
+
+let allCategories = ["Image", "Video", "3D", "Math", "Data", "Text", "Crypto", "Algorithms"]
+
+/// Geometric mean of Swift/Rust ratios for the measured rows.
+func geomean(_ rows: [BenchRow]) -> Double? {
+    let r = rows.compactMap(\.ratio)
+    guard !r.isEmpty else { return nil }
+    return exp(r.map { log($0) }.reduce(0, +) / Double(r.count))
+}
+
+/// One button per category: run it, see its geomean.
+private struct CategoryRunGrid: View {
+    @Environment(CoreBridge.self) private var bridge
+    let bench: BenchmarkState
+    let categories: [String]
+
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 8)], spacing: 8) {
+            ForEach(categories, id: \.self) { cat in
+                let rows = bench.rows.filter { $0.category == cat }
+                Button {
+                    bridge.dispatch(.runCategory(category: cat))
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: categorySymbol(cat))
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 28, height: 28)
+                            .background(categoryColor(cat).gradient, in: RoundedRectangle(cornerRadius: 7))
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(cat).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+                            Text(subtitle(rows)).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 2)
+                        Image(systemName: "play.fill").font(.caption).foregroundStyle(categoryColor(cat))
+                    }
+                    .padding(8)
+                    .background(.background, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(bench.running)
+                .accessibilityIdentifier("run-category-" + cat)
+            }
+        }
+    }
+
+    private func subtitle(_ rows: [BenchRow]) -> String {
+        if let g = geomean(rows) { return "\(rows.count) tests · " + String(format: "%.2f×", g) }
+        return "\(rows.count) tests"
+    }
+}
+
+/// Section header for one category with its own Run button and geomean.
+private struct CategoryHeader: View {
+    let category: String
+    let rows: [BenchRow]
+    let running: Bool
+    let run: () -> Void
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Label(category, systemImage: categorySymbol(category))
+                .font(.title3.weight(.bold))
+                .foregroundStyle(categoryColor(category))
+            Text("\(rows.count) tests").font(.caption).foregroundStyle(.secondary)
+            if let g = geomean(rows) {
+                Text(String(format: "geomean %.2f×", g))
+                    .font(.caption.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(ratioColor(g))
+            }
+            Spacer()
+            Button(action: run) {
+                Label("Run", systemImage: "play.fill").font(.subheadline.weight(.semibold))
+            }
+            .buttonStyle(.bordered)
+            .tint(categoryColor(category))
+            .disabled(running)
+        }
+        .padding(.top, 6)
+    }
+}
 
 struct SectionTitle: View {
     let title: String
@@ -310,7 +420,7 @@ private struct ResultsTable: View {
                 GridRow {
                     Text("Test")
                     Text("Rust").gridColumnAlignment(.trailing)
-                    Text("Rust ∥").gridColumnAlignment(.trailing)
+                    Text("Rayon").gridColumnAlignment(.trailing)
                     Text("Swift").gridColumnAlignment(.trailing)
                     Text("Ratio").gridColumnAlignment(.trailing)
                 }
@@ -349,7 +459,7 @@ private struct ResultsTable: View {
                     }
                 }
             }
-            Text("Rust = single thread · Rust ∥ = rayon, \(threads) threads (not in ratio) · Ratio = Swift / Rust")
+            Text("Rust = single thread · Rayon = Rust on \(threads) threads (not in ratio) · Ratio = Swift / Rust")
                 .font(.caption2).foregroundStyle(.secondary)
             }
         }
@@ -408,7 +518,7 @@ private struct RatioChartCard: View {
                             .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
                             .foregroundStyle(.secondary)
                     }
-                    .chartForegroundStyleScale(["Media": Color.pink, "General": Color.orange])
+                    .chartForegroundStyleScale(domain: allCategories, range: allCategories.map(categoryColor))
                     .chartLegend(position: .bottom)
                     .frame(height: CGFloat(done.count) * 30 + 50)
                 }
@@ -417,7 +527,7 @@ private struct RatioChartCard: View {
     }
 }
 
-/// Swift Charts: Rust, Rust ∥ and Swift side by side in ms for the selected category.
+/// Swift Charts: Rust, Rust (rayon) and Swift side by side in ms for the selected category.
 private struct DurationChartCard: View {
     let rows: [BenchRow]
     let categories: [String]
@@ -435,7 +545,7 @@ private struct DurationChartCard: View {
             var out: [Point] = []
             let name = shortName(r.id, fallback: r.name)
             if let m = r.rust { out.append(Point(id: r.id + "r", test: name, lang: "Rust", ms: m.avgMs)) }
-            if let m = r.rustParallel { out.append(Point(id: r.id + "p", test: name, lang: "Rust ∥", ms: m.avgMs)) }
+            if let m = r.rustParallel { out.append(Point(id: r.id + "p", test: name, lang: "Rust (rayon)", ms: m.avgMs)) }
             if let m = r.swift { out.append(Point(id: r.id + "s", test: name, lang: "Swift", ms: m.avgMs)) }
             return out
         }
@@ -448,7 +558,7 @@ private struct DurationChartCard: View {
                 Picker("Category", selection: $selection) {
                     ForEach(categories, id: \.self) { Text($0).tag($0) }
                 }
-                .pickerStyle(.segmented)
+                .pickerStyle(.menu)
                 if points.isEmpty {
                     EmptyChartHint()
                 } else {
@@ -457,7 +567,7 @@ private struct DurationChartCard: View {
                             .foregroundStyle(by: .value("Language", p.lang))
                             .position(by: .value("Language", p.lang))
                     }
-                    .chartForegroundStyleScale(["Rust": Color.orange, "Rust ∥": Color.brown, "Swift": Color.blue])
+                    .chartForegroundStyleScale(["Rust": Color.orange, "Rust (rayon)": Color.brown, "Swift": Color.blue])
                     .chartLegend(position: .bottom)
                     .frame(height: CGFloat(Set(points.map(\.test)).count) * 56 + 50)
                 }

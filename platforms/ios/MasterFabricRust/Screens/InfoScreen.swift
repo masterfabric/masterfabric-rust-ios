@@ -231,7 +231,7 @@ private struct MeasuredChart: View {
                             .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
                             .foregroundStyle(.secondary)
                     }
-                    .chartForegroundStyleScale(["Media": Color.pink, "General": Color.orange])
+                    .chartForegroundStyleScale(domain: allCategories, range: allCategories.map(categoryColor))
                     .chartLegend(position: .bottom)
                     .frame(height: CGFloat(measured.count) * 28 + 50)
                 }

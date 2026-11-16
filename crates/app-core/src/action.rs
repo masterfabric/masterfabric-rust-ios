@@ -21,6 +21,8 @@ pub enum Action {
     RunBenchmark { id: String },
     /// Run all benchmarks in order.
     RunAllBenchmarks,
+    /// Run every benchmark of one category (e.g. "Image").
+    RunCategory { category: String },
     /// Clear benchmark results.
     ResetBenchmarks,
     /// Record a platform-measured performance metric (launch time, latency, ...).

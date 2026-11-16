@@ -199,7 +199,7 @@ fn parallel_variant_is_measured_and_matches() {
 }
 
 #[test]
-fn info_screen_and_media_featured() {
+fn info_screen_and_categories() {
     let app = App::new();
     app.dispatch(Action::OpenInfo);
     let s = app.state();
@@ -207,12 +207,59 @@ fn info_screen_and_media_featured() {
     assert!(s.info.categories.len() >= 10);
     // No numbers until something was measured.
     assert!(s.info.measured.is_empty());
-    // Media tests come first.
-    assert!(s
-        .benchmark
-        .rows
-        .iter()
-        .take(5)
-        .all(|r| r.category == "Media"));
-    assert_eq!(s.benchmark.rows[0].id, "raytrace");
+    // 30+ tests, grouped by category in the fixed order.
+    let rows = &s.benchmark.rows;
+    assert!(rows.len() >= 30);
+    let mut seen: Vec<&str> = Vec::new();
+    for r in rows {
+        if seen.last() != Some(&r.category.as_str()) {
+            assert!(
+                !seen.contains(&r.category.as_str()),
+                "category {} is split",
+                r.category
+            );
+            seen.push(&r.category);
+        }
+    }
+    assert_eq!(
+        seen,
+        [
+            "Image",
+            "Video",
+            "3D",
+            "Math",
+            "Data",
+            "Text",
+            "Crypto",
+            "Algorithms"
+        ]
+    );
+    let mut ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    assert_eq!(ids.len(), rows.len(), "duplicate benchmark id");
+}
+
+#[test]
+fn run_category_only_runs_that_category() {
+    let app = App::new();
+    app.dispatch(Action::RunCategory {
+        category: "Crypto".into(),
+    });
+    wait_idle(&app);
+    let s = app.state().benchmark;
+    for r in &s.rows {
+        assert_eq!(r.rust.is_some(), r.category == "Crypto", "{}", r.id);
+    }
+}
+
+#[test]
+fn every_benchmark_runs_and_parallel_matches() {
+    for spec in app_core::screens::benchmark::specs() {
+        let c = app_core::workloads::run_once(spec.id, spec.param).expect(spec.id);
+        if spec.parallel {
+            let p = app_core::workloads::run_once_parallel(spec.id, spec.param).expect(spec.id);
+            assert_eq!(c, p, "{} parallel checksum", spec.id);
+        }
+    }
 }

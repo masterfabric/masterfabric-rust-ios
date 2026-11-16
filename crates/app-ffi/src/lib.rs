@@ -227,6 +227,9 @@ pub enum Action {
         id: String,
     },
     RunAllBenchmarks,
+    RunCategory {
+        category: String,
+    },
     ResetBenchmarks,
     RecordPerf {
         id: String,
@@ -573,6 +576,7 @@ impl From<Action> for core::Action {
             Action::ToggleFavorite { item_id } => core::Action::ToggleFavorite { item_id },
             Action::RunBenchmark { id } => core::Action::RunBenchmark { id },
             Action::RunAllBenchmarks => core::Action::RunAllBenchmarks,
+            Action::RunCategory { category } => core::Action::RunCategory { category },
             Action::ResetBenchmarks => core::Action::ResetBenchmarks,
             Action::RecordPerf {
                 id,
@@ -602,8 +606,8 @@ mod tests {
         let s = core.state();
         assert_eq!(s.current, Route::Detail { item_id: 3 });
         assert_eq!(s.details.len(), 1);
-        assert_eq!(s.benchmark.rows.len(), 12);
-        assert_eq!(s.benchmark.rows[0].category, "Media");
+        assert!(s.benchmark.rows.len() >= 30);
+        assert_eq!(s.benchmark.rows[0].category, "Image");
         assert!(!s.info.categories.is_empty());
     }
 }

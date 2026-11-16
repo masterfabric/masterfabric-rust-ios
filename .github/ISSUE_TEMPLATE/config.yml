@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 📖 Documentation
+    url: https://github.com/masterfabric/masterfabric-rust-ios/blob/main/README.md
+    about: Build steps, architecture flow, benchmarks and launch arguments
+  - name: 🔒 Report a security vulnerability
+    url: https://github.com/masterfabric/masterfabric-rust-ios/security/advisories/new
+    about: Report vulnerabilities privately (GitHub private vulnerability reporting), not as an issue
+  - name: 🦀 UniFFI documentation
+    url: https://mozilla.github.io/uniffi-rs/
+    about: Reference for the Rust ↔ Swift bindings

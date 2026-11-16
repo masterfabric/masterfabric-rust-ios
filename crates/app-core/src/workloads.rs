@@ -58,7 +58,7 @@ pub fn run_once(id: &str, param: u64) -> Option<u64> {
         IMAGE => crate::media::image_pipeline(param as usize),
         VIDEO => crate::media::video_pipeline(param as usize),
         MESH => crate::media::mesh_bench(param as u32),
-        _ => return None,
+        _ => return crate::heavy::run(id, param).map(black_box),
     };
     Some(black_box(checksum))
 }
@@ -73,7 +73,7 @@ pub fn run_once_parallel(id: &str, param: u64) -> Option<u64> {
         VIDEO => crate::media::video_pipeline_par(param as usize),
         SORT => sort_ints_par(param as usize),
         MATMUL => matmul_par(param as usize),
-        _ => return None,
+        _ => return crate::heavy::run_par(id, param).map(black_box),
     };
     Some(black_box(checksum))
 }

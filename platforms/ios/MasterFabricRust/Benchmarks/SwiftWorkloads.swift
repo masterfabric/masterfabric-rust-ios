@@ -35,7 +35,7 @@ enum SwiftWorkloads {
         case "image": return SwiftMedia.imagePipeline(Int(param))
         case "video": return SwiftMedia.videoPipeline(Int(param))
         case "mesh": return SwiftMedia.generateMesh(Int(param)).checksum
-        default: return nil
+        default: return SwiftHeavy.run(id, param)
         }
     }
 

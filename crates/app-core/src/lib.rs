@@ -8,6 +8,7 @@
 
 pub mod action;
 pub mod app;
+pub mod heavy;
 pub mod media;
 pub mod navigation;
 pub mod screens;

@@ -1,0 +1,43 @@
+name: ✨ Feature Request
+description: Suggest a screen, a benchmark or an improvement
+title: "[FEATURE] "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: checkboxes
+    id: prerequisites
+    attributes:
+      label: Prerequisites
+      options:
+        - label: I searched existing issues and feature requests
+          required: true
+  - type: dropdown
+    id: type
+    attributes:
+      label: Type
+      options:
+        - New benchmark (Rust + Swift twin)
+        - New screen / UI improvement
+        - Rust core / architecture
+        - Performance optimization
+        - Build / developer experience
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or motivation
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: For benchmarks, describe the algorithm, input size and how the checksum is computed so Rust and Swift can be compared.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered

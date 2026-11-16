@@ -1,0 +1,77 @@
+name: 🐛 Bug Report
+description: Something is broken in the app, the Rust core or the build
+title: "[BUG] "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please give as much detail as possible.
+  - type: checkboxes
+    id: prerequisites
+    attributes:
+      label: Prerequisites
+      options:
+        - label: I searched existing issues
+          required: true
+        - label: I read the [README](https://github.com/masterfabric/masterfabric-rust-ios/blob/main/README.md)
+          required: true
+        - label: I am on the latest `main`
+          required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - SwiftUI app (screens, navigation)
+        - Rust core (state, reducer, view models)
+        - FFI / UniFFI bindings
+        - Benchmarks (results, checksums, charts)
+        - Build scripts / XcodeGen / xcframework
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: target
+    attributes:
+      label: Where does it happen?
+      options:
+        - iOS Simulator
+        - Physical iPhone / iPad
+        - Host build (cargo, crosscheck.sh)
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the bug and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ./scripts/build-ios.sh
+        2. ./scripts/run-sim.sh -startScreen benchmark -autorun YES
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: |
+        macOS / Xcode version:
+        rustc --version:
+        Device / simulator and iOS version:
+        Commit:
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and screenshots
+      description: Build output, crash logs, perf.json, screenshots.
+      render: shell

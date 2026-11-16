@@ -405,6 +405,19 @@ fn reduce(s: &mut AppState, action: Action) -> (u8, Option<Vec<String>>) {
                 None => (0, None),
             }
         }
+        Action::RunCategory { category } => {
+            let ids = s
+                .bench
+                .rows
+                .iter()
+                .filter(|r| r.category == category)
+                .map(|r| r.id.clone())
+                .collect();
+            match s.bench.begin(ids) {
+                Some(job) => (BENCH | INFO, Some(job)),
+                None => (0, None),
+            }
+        }
         Action::ResetBenchmarks => {
             s.bench.reset();
             (BENCH | INFO, None)
