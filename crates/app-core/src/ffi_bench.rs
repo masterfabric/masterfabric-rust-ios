@@ -388,56 +388,76 @@ impl FfiBenchState {
         Some(v[v.len() / 2])
     }
 
+    /// Extra ns per call of a marshaling case (per call − inline).
+    pub fn marshal_overhead(&self, case: &str) -> Option<f64> {
+        self.rows
+            .iter()
+            .find(|r| r.case_id == case)
+            .and_then(|r| r.overhead_ns)
+    }
+
     /// Crossover analysis. `compute_speedup`: geometric-mean Rust/Swift ratio of the
     /// compute benchmarks, if measured.
     pub fn summary(&self, compute_speedup: Option<f64>) -> Option<String> {
         let c = self.crossing_ns()?;
-        let s = compute_speedup.filter(|s| *s > 1.0);
         let inline = self
             .rows
             .iter()
             .filter(|r| r.case_id == CASE_U64 && r.calls >= 1_000)
             .filter_map(|r| r.swift_inline.as_ref().map(|x| x.ns_per_call))
             .fold(f64::NAN, f64::min);
-        let batch1 = self
-            .rows
-            .iter()
-            .find(|r| r.case_id == CASE_U64 && r.calls == 1)
-            .and_then(|r| r.rust_batched.as_ref().map(|x| x.ns_per_call));
-        let batch_big = self
+        let mut out = format!(
+            "Scalar calls (u64 in, u64 out) cross almost for free: ≈ {c:.1} ns extra per call"
+        );
+        if inline.is_finite() {
+            out += &format!(" (the op itself: {inline:.1} ns)");
+        }
+        out += ". ";
+        let parts: Vec<String> = [
+            (CASE_STRING, "a String"),
+            (CASE_RECORD, "a 3×i32 record"),
+            (CASE_VEC, "a Vec<u32>×16"),
+        ]
+        .iter()
+        .filter_map(|(id, name)| {
+            self.marshal_overhead(id)
+                .map(|o| format!("{name} +{}", fmt_ns(o)))
+        })
+        .collect();
+        if !parts.is_empty() {
+            out += &format!(
+                "What costs is anything serialized into a RustBuffer: {} per call. ",
+                parts.join(", ")
+            );
+        }
+        if let Some(r) = self
             .rows
             .iter()
             .find(|r| r.case_id == CASE_U64 && r.calls == 100_000)
-            .and_then(|r| r.batched_ratio);
-        let mut out = format!("One Swift→Rust UniFFI call costs ≈ {c:.1} ns on top of the work");
-        if inline.is_finite() {
-            out += &format!(" (the tiny op itself: {inline:.2} ns inline in Swift)");
-        }
-        out += ". ";
-        if let Some(b) = batch1 {
-            out += &format!("A single batched call pays it once (≈ {b:.1} ns total). ");
-        }
-        if let Some(r) = batch_big {
+            .and_then(|r| r.batched_ratio)
+        {
             out += &format!(
-                "At 100,000 ops per call the crossing is amortized: batched runs at {} . ",
+                "Batched (1 call, 100,000 ops in Rust): {}. ",
                 slowdown_text(r)
             );
         }
-        match s {
-            Some(s) => {
-                let w = c * s / (s - 1.0);
-                out += &format!(
-                    "Break-even: with Rust {s:.2}× faster at compute (geomean of the compute tests), a call must carry ≥ {} of Swift-equivalent work before moving it to Rust pays off; below that, chatty calls make Rust slower.",
-                    fmt_ns(w)
-                );
-            }
-            None => {
-                out += &format!(
-                    "Break-even: if Rust is s× faster at the work, a call needs ≥ {c:.0}·s/(s−1) ns of Swift-equivalent work (e.g. {} at 2×). Run the compute tests to use the measured s.",
-                    fmt_ns(c * 2.0)
-                );
-            }
+        let worst = self
+            .marshal_overhead(CASE_VEC)
+            .or(self.marshal_overhead(CASE_RECORD));
+        let (s, measured) = match compute_speedup.filter(|s| *s > 1.0) {
+            Some(s) => (s, true),
+            None => (2.0, false),
+        };
+        let k = s / (s - 1.0);
+        out += &format!(
+            "Break-even at Rust {s:.2}× faster{}: a call must carry ≥ {} of Swift-time work with scalar args",
+            if measured { " (compute geomean)" } else { " (assumed; run the compute tests for the measured value)" },
+            fmt_ns(c * k)
+        );
+        if let Some(w) = worst {
+            out += &format!(", ≥ {} with a Vec/record arg", fmt_ns(w * k));
         }
+        out += ". Below that, chatty calls make Rust slower than staying in Swift.";
         Some(out)
     }
 
@@ -463,8 +483,10 @@ impl FfiBenchState {
 fn fmt_ns(ns: f64) -> String {
     if ns >= 1000.0 {
         format!("{:.2} µs", ns / 1000.0)
-    } else {
+    } else if ns >= 10.0 {
         format!("{ns:.0} ns")
+    } else {
+        format!("{ns:.1} ns")
     }
 }
 
@@ -514,6 +536,7 @@ mod tests {
         }
         assert_eq!(st.crossing_ns(), Some(20.0));
         let s = st.summary(Some(2.0)).unwrap();
-        assert!(s.contains("40 ns"), "{s}");
+        assert!(s.contains("≥ 40 ns"), "{s}");
+        assert!(s.contains("String +20 ns"), "{s}");
     }
 }
